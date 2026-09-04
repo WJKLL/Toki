@@ -11,8 +11,11 @@ abstract final class AppConstants {
 
   /// 应用版本（与 pubspec version 同步，S-04 平台信息服务读取）。
   /// v1.34.0:同步为当前发布版本(此前长期滞留 1.17.4,关于页/日志失真)。
-  static const String appVersion = '1.34.2';
-  static const String buildNumber = '123';
+  static const String appVersion = '1.35.2';
+  static const String buildNumber = '126';
+
+  /// UAPI 接口平台 base（v1.35.0：通用工具 apiPath 统一前缀）。
+  static const String uapiBaseUrl = 'https://uapis.cn';
 
   /// 响应式断点（U-04）：< 700px 竖屏底部导航；≥ 700px 左侧导航栏（§1 技术栈）。
   static const double breakpointWidth = 700;

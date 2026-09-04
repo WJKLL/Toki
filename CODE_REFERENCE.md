@@ -67,12 +67,13 @@ core（常量、通用组件、日志、性能、工具服务）
 - 设置持久化唯一写入口：`settings_providers.dart` 的 `AppSettingsController`；落盘 key 见下方存储表。
 - **毛玻璃策略（U-03）**：Android 13+ 真模糊；Android 12 及以下 / Web 一律半透明降级（预期行为）。动效开关关闭时全局无动画。
 
-### 2.5 工具页与 Steam 查询（P-08）
+### 2.5 工具系统（F-04 / P-09 / C-40~42，v1.35）
 
-- 工具目录：`domain/entities/tool_item.dart`（`kToolCatalog`，工具页入口网格与首页动态卡共用）。
-- 工具入口 C-36：点按进工具路由；长按 500ms + 触觉 → 「添加到首页」（`MiuixOverlayDialog` 自适应弹层）。
-- Steam 查询页 P-08：四态机（idle/loading/success/error）；输入自动识别 4 种格式；`core/tools/steam_api_service.dart` 封装 UAPI `GET uapis.cn/api/v1/game/steam/summary`（无 key 可用；错误按 400/401/404/502 分类）。
-- 凭证：`steam_auth_service.dart` —— Android/桌面 `flutter_secure_storage`（Keystore 加密），Web 降级 shared_preferences；密钥不进日志、不回显。
+- **工具目录 JSON 外部化**：`assets/tools/tools.json`（26 个实测 UAPI 工具 / 14 分类）→ `main()` 启动预加载进 `core/tools/tool_catalog_store.dart`（内存缓存 + 同步 `byIdSync`，异常降级内置 Steam）。**新增工具 = 只改 JSON，零代码**。
+- **工具页分组**：P-01-04 按分类渲染 C-42 折叠面板（默认折叠、点击展开、展开才渲染）；入口按钮 C-36（点按进工具、长按 500ms 添加首页）。
+- **通用工具页 P-09**（`/tool/:toolId`，R-12）：C-40 动态参数（text/number/select，配置驱动）+ `core/tools/tool_api_service.dart` 统一调用（GET/POST、JSON/图片字节双态返回、并发限制、错误分类）+ C-41 结果展示（image 两态 / text / keyValue / list / json，按 `result` 字段映射渲染）；无参工具进页自动请求；凭证行复用 C-39。
+- **Steam 定制保留**：Steam 用户走定制页 P-08（`customRoute:'/steam'`，不经通用管道，零回归）；凭证 `steam_auth_service.dart`（Android Keystore 加密 / Web 降级；密钥不进日志）。
+- **深色可读性（v1.35.2）**：`core/widgets/card_dark_glow.dart` 深色卡片 1px 微亮描边 + 极弱光晕（浅色零开销）；C-42 标题条与首页卡共用 `CardShadow` 阴影语言。
 
 ### 2.6 内容源与性能
 
@@ -107,8 +108,11 @@ core（常量、通用组件、日志、性能、工具服务）
 | C-35 | 悬浮单选选择窗 | `widgets/c35_quote_option_sheet.dart` | 内容设置选择浮窗（MiuixOverlayDialog 自适应） |
 | C-36 | 工具入口按钮 | `widgets/c36_tool_entry_button.dart` | 工具目录入口：点按进路由 / 长按添加至首页 |
 | C-37 | 工具启动卡 | `cards/card_steam_tool.dart` | 首页网格动态工具卡（✕ 移除由 C-34 编辑态提供） |
-| C-38 | Steam 徽标自绘 | `core/widgets/steam_logo_icon.dart` | 官方剪影 CustomPainter（tint 单色） |
+| C-38 | 徽标自绘/工具图标 | `core/widgets/steam_logo_icon.dart` / `tool_brand_icon.dart` | Steam 官方剪影（custom:steam 自绘）；其余工具走 MiuixIcons（v1.35 泛化 ToolBrandIcon） |
 | C-39 | 密钥弹层 | `widgets/c39_steam_key_sheet.dart` | 凭证 obscure 输入 + 切换 + 清除 |
+| C-40 | 动态参数输入 | `widgets/c40_tool_dynamic_params.dart` | tools.json `params` 配置驱动控件（v1.35） |
+| C-41 | 通用结果展示 | `widgets/c41_tool_result_display.dart` | displayType 分发：image 两态/text/keyValue/list/json（v1.35） |
+| C-42 | 分类折叠面板 | `widgets/c42_tool_category_panel.dart` | 工具页分组：默认折叠/点击展开/懒渲染/圆角标题条（v1.35） |
 | C-27/28 | 预模糊 / 降采样快照 | `widgets/c27_prefrosted_blur.dart` / `c28_downsampled_capture.dart` | 毛玻璃性能方案 |
 
 > C-01/C-02/C-12 为早期设计编号残留，无独立文件；窄屏底栏由 C-22 承担、宽屏为 `MiuixNavigationRail`。
@@ -127,6 +131,7 @@ core（常量、通用组件、日志、性能、工具服务）
 | 主题配置 | P-01-02-01 | `/settings/theme`（R-08） | `features/settings/page_p01_02_01_theme_config_page.dart` |
 | 大课表 | P-06 | `/timetable`（R-10） | `features/timetable/page_p06_timetable_page.dart` |
 | Steam 用户查询 | P-08 | `/steam`（R-11） | `features/tools/page_p08_steam_query_page.dart` |
+| 通用工具 | P-09 | `/tool/:toolId`（R-12） | `features/tools/page_p09_tool_generic.dart` |
 | 每日活动编辑器 | P-05 | 非路由弹层（deferred） | `features/home/p05_activity_editor.dart` |
 | 开屏用户协议 | P-07 | 启动浮层（非路由） | `widgets/agreement_gate.dart` + `c31_agreement_card.dart` |
 
@@ -144,6 +149,8 @@ core（常量、通用组件、日志、性能、工具服务）
 
 | 想改什么 | 去哪个文件 |
 | :--- | :--- |
+| **加新工具/分类** | **只改 `assets/tools/tools.json`**（路径/参数/displayType/result 字段映射，零代码）；图标兜底见 `tool_config.dart` |
+| 工具请求/错误/限流 | `core/tools/tool_api_service.dart`（ToolApiService） |
 | 网格行高/间距/列数 | `c34_responsive_card_grid.dart` 顶部常量（`kGridRowHeight`/`kGridCardGap`/`gridColumnsForWidth`） |
 | 卡片阴影/圆角 | `cards/card_shell.dart`（CardShadow）/ 各卡 `borderRadius` |
 | 首页卡片顺序或加新卡 | `home_cards_provider.dart`（顺序）→ `home_card.dart`（加 sealed 数据类）→ `cards/` 新建 + C-34 `_cardWidget` 补分支 |
@@ -154,7 +161,7 @@ core（常量、通用组件、日志、性能、工具服务）
 | 顶部更多菜单项 | `providers/nav_items_providers.dart`（`moreMenuItemsProvider`） |
 | 加一级页（底栏页） | `nav_items_providers.dart`（项）→ `features/` 建页 → `main_shell_page.dart`（PageView）→ `app_router.dart`（redirect） |
 | 加二级页 | `features/` 建页 → `app_router.dart`（`_knownPaths` + `GoRoute`，分配 R-xx）→ 加入口 |
-| 工具目录/工具页 | `domain/entities/tool_item.dart`（目录）→ `features/tools/page_p01_04_tools_page.dart`（分组展示） |
+| 工具页分类/入口布局 | `features/tools/page_p01_04_tools_page.dart`（C-42 分组折叠 → C-36 入口）；通用页 `features/tools/page_p09_tool_generic.dart` |
 | 主题/深色/Monet | `main.dart`（MiuixThemeController）+ 设置页 P-01-02-01；勿硬编码颜色 |
 | 每日一言/问候语 | `providers/quote_provider.dart`（S-21/S-22），改静态文案没用 |
 | 图标 | 统一经 `core/widgets/app_icons.dart` 的 `appIcon()`；Steam 徽标用 C-38 组件 |

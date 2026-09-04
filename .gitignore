@@ -47,9 +47,13 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Local machine config
-/android/local.properties
+# ── v1.35.0 本地 git 化(内部回滚,不公开)──────────────
+# 本机路径/机器相关,不入库(他人机器 checkout 后各自生成)
+android/local.properties
+# Android 构建缓存(每次构建生成,体积大)
+android/.gradle/
+# Android 构建产物报告
+/android/build/
 
-# Kotlin local cache
-android/.kotlin/
-.kotlin/
+# Release ��װ��(������Ʋ����,�� GitHub Release ����)
+/release/

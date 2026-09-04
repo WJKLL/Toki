@@ -10,6 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart'
     show MaterialApp, ThemeData, ThemeMode, ColorScheme, Brightness;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,7 @@ import 'core/constants/app_constants.dart';
 import 'core/logging/app_log_service.dart';
 import 'core/logging/perf_monitor.dart';
 import 'core/refresh_rate/refresh_rate_controller.dart';
+import 'core/tools/tool_catalog_store.dart';
 import 'core/utils/u04_platform_utils.dart';
 import 'core/widgets/app_scroll_behavior.dart';
 import 'data/repositories/agreement_repository_impl.dart';
@@ -63,6 +65,31 @@ Future<void> main() async {
   // v1.9.0（S-13）：注册全局异常捕获（FlutterError + PlatformDispatcher），
   //   崩溃日志入环形缓冲；zone 兜底未捕获异步异常。
   AppLogService.instance.installGlobalHandlers();
+
+  // v1.35.0（P-09）：工具目录 JSON 预加载 —— 本地 asset 读（非网络，几 KB），
+  //   解析进内存缓存后 runApp，首页工具卡对账（byIdSync）同步可用；
+  //   读/解析异常 → 降级内置 Steam 单工具（P-08 入口保底）+ 写日志。
+  try {
+    final String catalogJson =
+        await rootBundle.loadString('assets/tools/tools.json');
+    if (!ToolCatalogStore.instance.seedFromJsonString(catalogJson)) {
+      AppLogService.instance.error(
+        'catalog',
+        '工具目录解析失败，降级内置目录',
+        null,
+        StackTrace.current,
+      );
+      ToolCatalogStore.instance.seedFallback();
+    }
+  } catch (e) {
+    AppLogService.instance.error(
+      'catalog',
+      '工具目录加载失败：$e',
+      e,
+      StackTrace.current,
+    );
+    ToolCatalogStore.instance.seedFallback();
+  }
 
   runZonedGuarded(
     () => runApp(

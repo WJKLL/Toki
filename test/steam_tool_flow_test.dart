@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/core/tools/steam_api_service.dart';
 import 'package:xiangjugong/core/tools/steam_auth_service.dart';
+import 'package:xiangjugong/core/tools/tool_catalog_store.dart';
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
@@ -22,6 +23,7 @@ import 'package:xiangjugong/presentation/providers/settings_providers.dart';
 import 'package:xiangjugong/presentation/providers/steam_providers.dart';
 import 'package:xiangjugong/presentation/widgets/c34_responsive_card_grid.dart';
 import 'package:xiangjugong/presentation/widgets/c36_tool_entry_button.dart';
+import 'package:xiangjugong/presentation/widgets/c42_tool_category_panel.dart';
 import 'package:xiangjugong/presentation/widgets/cards/card_steam_tool.dart';
 import 'package:xiangjugong/presentation/widgets/cards/card_summary.dart';
 
@@ -60,6 +62,9 @@ void main() {
   });
 
   Future<void> pumpApp(WidgetTester tester) async {
+    // v1.35.0:测试不走 main() 预加载 → 显式 seed 目录(内置 Steam 保底,
+    //   供首页工具卡对账 / 工具页 C-36 入口 / /steam 定制路由使用)。
+    ToolCatalogStore.instance.seedFallback();
     fakeAuth = _FakeAuthService();
     SharedPreferences.setMockInitialValues(<String, Object>{
       'user_agreement_accepted': true,
@@ -96,6 +101,17 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
   }
 
+  /// 进入工具页并确保「游戏」分类展开(v1.35.0 C-42 默认折叠):
+  /// 已展开(懒渲染 C-36 可见)则不重复点击,避免收起。
+  Future<void> openGameGroup(WidgetTester tester) async {
+    await switchTab(tester, '工具');
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    if (find.byType(C36ToolEntryButton).evaluate().isEmpty) {
+      await tester.tap(find.text('游戏'), warnIfMissed: false);
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    }
+  }
+
   /// 消化 S-16 高刷释放 Timer(3s)等非帧 Timer,避免测试尾 pending 断言。
   Future<void> settleTimers(WidgetTester tester) async {
     await tester.pump(const Duration(seconds: 4));
@@ -107,9 +123,9 @@ void main() {
     expect(find.byType(C37SteamToolCard), findsNothing);
     expect(find.byType(C27HomeSummary), findsOneWidget);
 
-    // 切到工具页:分组 + 入口按钮。
-    await switchTab(tester, '工具');
-    expect(find.text('🎮 游戏工具'), findsOneWidget);
+    // 切到工具页:分类折叠面板(默认折叠)→ 展开游戏分类见 Steam 入口。
+    await openGameGroup(tester);
+    expect(find.byType(C42ToolCategoryPanel), findsOneWidget);
     expect(find.byType(C36ToolEntryButton), findsOneWidget);
 
     // 长按 500ms(Flutter 默认长按时长)→ 添加弹层。
@@ -144,7 +160,7 @@ void main() {
   testWidgets('首页工具卡点击 → /steam 页:输入查询成功态展示', (tester) async {
     await pumpApp(tester);
     // 预置已添加:经工具页长按 UI 添加(同 repository 实例在 scope 内)。
-    await switchTab(tester, '工具');
+    await openGameGroup(tester);
     await tester.longPress(find.byType(C36ToolEntryButton));
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await tester.tap(find.byKey(const ValueKey('toolAdd.steam_summary')));
@@ -186,7 +202,7 @@ void main() {
 
   testWidgets('凭证行 → 密钥弹层:保存后状态更新为已配置', (tester) async {
     await pumpApp(tester);
-    await switchTab(tester, '工具');
+    await openGameGroup(tester);
     await tester.tap(find.byType(C36ToolEntryButton)); // 点按 → 进入 /steam
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
 
@@ -210,7 +226,7 @@ void main() {
   testWidgets('编辑态:长按工具卡静止松手 → ✕ 出现 → 点主体不跳转 → ✕ 移除(v1.34.2)', (tester) async {
     await pumpApp(tester);
     // 预置已添加(同 repository 实例)。
-    await switchTab(tester, '工具');
+    await openGameGroup(tester);
     await tester.longPress(find.byType(C36ToolEntryButton));
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await tester.tap(find.byKey(const ValueKey('toolAdd.steam_summary')));
@@ -256,7 +272,7 @@ void main() {
     expect(find.byType(C37SteamToolCard), findsNothing);
 
     // 再回工具页长按:入口恢复「✨ 添加至首页」(可再次添加)。
-    await switchTab(tester, '工具');
+    await openGameGroup(tester);
     await tester.longPress(find.byType(C36ToolEntryButton));
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     expect(find.text('✨ 添加至首页'), findsOneWidget);
@@ -269,7 +285,7 @@ void main() {
 
   testWidgets('编辑态:系统返回(侧滑)退出后卡片主体恢复可点(v1.34.2)', (tester) async {
     await pumpApp(tester);
-    await switchTab(tester, '工具');
+    await openGameGroup(tester);
     await tester.longPress(find.byType(C36ToolEntryButton));
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     await tester.tap(find.byKey(const ValueKey('toolAdd.steam_summary')));

@@ -2,6 +2,49 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.35.2（2026-09-04）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 视觉 | **分类标题条立体阴影 + 深色描边光晕**(用户定稿)：C-42 圆角长条外包首页卡同源 `CardShadow`(双层投影,立体感/可读性提升);新增 `CardDarkGlow` 统一深色增强 —— 深色模式下卡片 1px 微亮描边(白 5%)+ 极弱环境光晕(静态、低对比、过渡自然),浅色模式零开销透传;应用于 C-42 标题条 / C-03 分组卡(设置/Steam/通用页全部内容卡)/ 首页工具卡 | C-42 / C-03 / C-37 / C-27 | Android 11+ / Web |
+| 视觉 | **每日一言长句自适应**:C-27 摘要卡一言去掉 `maxLines 2` 截断 —— 长句下卡片高度随内容自然增高全部显示(Column min 自适应,无固定高约束),来源行保持 | C-27 / P-01-01 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.35.1+125` → `1.35.2+126`(视觉优化 → Patch,§1.3;只升不降)。
+- 新增内部件 `CardDarkGlow`(core/widgets/card_dark_glow.dart)：深色卡片描边光晕统一入口(radius 与内卡圆角对齐)。
+
+## v1.35.1（2026-09-04）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 视觉 | **工具页分类标题条圆角长条化**(用户定稿)：C-42 头部由裸文本+整宽分割线改为**独立圆角长条**(圆角 14、表面淡底 `surfaceContainerHigh 35%`、高 46 单行:分类图标·名称·`N 个`·旋转箭头,整条 MiuixPressable sink 折叠/展开);**中间分割**落实为展开区顶部**缩进分割线**(outline 淡,left 16,标题与入口网格分界);收起态分类条间保持原间距;折叠/懒渲染/列数逻辑不变(功能零改动) | C-42 / P-01-04 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.35.0+124` → `1.35.1+125`(视觉优化 → Patch,§1.3;只升不降)。
+- C-42 头部样式重做(交互不变)。
+
+## v1.35.0（2026-09-04）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **工具目录 JSON 外部化**(UAPI 批量工具基础设施 · 阶段 0)：`ToolItem` 硬编码目录演进为 `ToolConfig`(assets/tools/tools.json,**26 个实测工具 / 14 分类**,新增工具零代码) —— `main()` 启动预加载(本地 asset,非网络)+ `ToolCatalogStore` 内存缓存 + **同步** `byIdSync` 对账(首页工具卡语义零改动);读/解析异常**降级内置 Steam 单工具**(P-08 入口保底) | F-04 / P-01-04 / C-36 / C-37 / P-01-01 | Android 11+ / Web |
+| 功能 | **工具页按 API 分类分组**(C-42 折叠面板)：14 个实测分类默认折叠、点击展开(MiuixPressable sink + AnimatedSize 300ms),**展开才渲染**入口网格(懒渲染);分类图标 MiuixIcons.extended,工具 icon 缺省回退分类 icon;入口网格列数与首页网格同源 2/3/4 | C-42 / P-01-04 | Android 11+ / Web |
+| 功能 | **统一调用管道 ToolApiService**：GET(query) / POST(JSON body) / **POST body+query 混合**(实测翻译 `to_lang` 走 query);**双态返回** —— JSON 接口返回 `json`,图片接口返回**字节流**(实测必应壁纸/二维码/新闻图直接返回图片字节;302 自动跟随);错误统一 `{code,message}` 取 message 中文提示;并发限制 3 + 同参去重;http.Client 可注入(测试 fixture) | P-09 / T251 | Android 11+ / Web |
+| 功能 | **通用工具页 P-09**(`/tool/:toolId`,R-12)：C-40 动态参数(配置驱动 text/number/select 胶囊)+ 凭证行(C-39 UAPI key 弹层复用,匿名可用)+ 四态机;**无参工具进页自动请求**,成功后可刷新;内容 maxWidth 居中(与 P-08 一致);Steam 仍走定制页 /steam(customRoute,零回归) | P-09 / R-12 / C-40 / C-41 | Android 11+ / Web |
+| 功能 | **通用结果展示 C-41**(displayType 驱动)：image **两态**(`Image.memory` 字节 / `Image.network` 字段 URL 头图)、text(点击复制)、keyValue(中文标签筛字段,实测农历 20+ 字段只取 7)、list(标题/副行/URL 外开/cover 缩略)、json;**result 字段映射**由 25 接口实测驱动(非臆测) | C-41 | Android 11+ / Web |
+| 功能 | **工具目录全量录入**:25 个 UAPI 接口实测(apiPath/参数/响应结构逐个 curl + openapi.json 佐证)覆盖 14 类 —— 游戏(MC 服务器)、图片(必应壁纸/二维码)、网络(我的IP/IP归属)、随机(随机图/字符串/答案之书/一言)、文本(MD5/Base64 编解码/AES 加解密)、时间(时间戳/农历)、翻译、每日(单词/新闻图)、网页解析(元数据)、社交(B站用户)、杂项(热榜/菜谱)、搜索(聚合)、转换(JSON 格式化)、状态(API 用量) | F-04 | Android 11+ / Web |
+| 重构 | `tool_item.dart` 退役(`ToolItem`/`kToolCatalog`/`ToolItem.byId` 移除),引用全链迁移 `ToolConfig` + `byIdSync`;`ToolBrandIcon`(C-38 泛化)统一入口/首页卡/分类图标(Steam 自绘保留) | F-04 / C-36 / C-37 / C-38 / C-34 | Android 11+ / Web |
+| 测试 | +19:目录模型/Store(解析/降级/同步对账)、ToolApiService(参数组装/双态/错误分类/混合参数)、通用链路(分组折叠→入口→有参提交 text 模板→无参自动请求 keyValue 模板) | P-09 / C-40 / C-41 / C-42 | - |
+
+### 涉及编号变更
+- 版本：`1.34.2+123` → `1.35.0+124`(功能 → Minor,§1.3;只升不降)。
+- F-04 目录实体：`ToolItem`(const 静态)→ `ToolConfig`(JSON 外部化 + result 字段映射)。
+- 编号登记：P-09 通用工具页 / R-12 `/tool/:toolId` / C-40 动态参数 / C-41 结果展示 / C-42 分类折叠。
+- C-38 泛化：`SteamLogoIcon` → `ToolBrandIcon`(custom:steam 自绘 + MiuixIcons 分发)。
+
 ## v1.34.2（2026-09-03）[Android] [Web]
 
 ### 变更清单
