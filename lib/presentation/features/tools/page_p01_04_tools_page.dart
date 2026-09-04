@@ -1,15 +1,15 @@
-// lib/presentation/features/tools/page_p01_04_tools_page.dart
-// 编号：P-01-04 工具集页（F-04 工具集模块，v1.13.0 占位；v1.34.0 落地）
-// 说明：一级页面（底栏第二项）—— 「🎮 游戏工具」分组 + 响应式入口网格:
-//   - 分组标题 16sp w600 + 淡分割线(outlineVariant 语义,色板缺 token 时
-//     以 outline 35% alpha 近似) + 入口按钮网格(48dp 高 / 12dp 间距 /
-//     列数 = gridColumnsForWidth 与首页网格同源:<600→2 / 600-1099→3 /
-//     ≥1100→4);
-//   - 入口按钮 C-36:点按进工具页(R-11),长按 500ms 添加至首页(C-37);
-//   - 目录数据 kToolCatalog(domain/entities/tool_item.dart)。
-// 结构：与首页一致 —— C-25 顶部毛玻璃标题栏（MiuixTopAppBar 折叠 + 快照毛玻璃）、
-//   C-26 顶部更多菜单、内容 MiuixLayerBackdropCapture 捕获（采样 6 帧 + surface 底色）。
-// 功耗：静止零 ticker（CaptureHeartbeat 被动帧回调）；滚动时才采样。
+// === 文件: lib/presentation/features/tools/page_p01_04_tools_page.dart ===
+// 编号：P-01-04 工具集页（F-04 工具集模块，v1.13.0 占位；v1.34.0 落地；
+//   v1.35.0 目录 JSON 化 + 分类折叠）
+// 说明：一级页面（底栏第二项）—— 「按 UAPI 实测分类分组」折叠面板：
+//   - 数据源 toolCatalogProvider（assets/tools/tools.json 启动预加载）;
+//   - 每组 = C-42 分类折叠面板(默认折叠、点击展开、展开才渲染)：
+//     头部(分类图标+名+工具数+箭头) + 分割线 + 自适应入口网格
+//     (列数 gridColumnsForWidth:<600→2 / 600-1099→3 / ≥1100→4);
+//   - 入口按钮 C-36:点按进工具(定制路由或 /tool/:id),长按 500ms 添加首页;
+//   - Steam 工具仍走定制页 /steam（customRoute），其余走通用页。
+// 结构：与首页一致 —— C-25 顶部毛玻璃标题栏、C-26 更多菜单、快照毛玻璃。
+// 功耗：静止零 ticker;分组默认折叠(懒渲染);滚动时才采样。
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart' show Material, MaterialType;
 import 'package:flutter/widgets.dart';
@@ -18,19 +18,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
-import '../../../domain/entities/tool_item.dart';
+import '../../../domain/entities/tool_config.dart';
 import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
+import '../../providers/tool_items_provider.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
 import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
-import '../../widgets/c34_responsive_card_grid.dart';
-import '../../widgets/c36_tool_entry_button.dart';
+import '../../widgets/c28_downsampled_capture.dart';
+import '../../widgets/c42_tool_category_panel.dart';
 
-/// 工具页分组内边距(与 C03 组卡外边距一致,标题/网格对齐卡片边缘)。
+/// 工具页分组内边距(与 C03 组卡外边距一致,面板对齐卡片边缘)。
 const double _kGroupHorizontal = 12;
 
 class PageP0104ToolsPage extends ConsumerStatefulWidget {
@@ -109,8 +109,16 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
           ),
           addAutomaticKeepAlives: false,
           children: <Widget>[
-            // ── v1.34.0：🎮 游戏工具分组 ──
-            _buildGameGroup(context),
+            // ── v1.35.0：分类折叠面板（默认折叠;懒渲染）──
+            for (final ToolCategoryNode node in _groups()) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: _kGroupHorizontal,
+                ),
+                child: C42ToolCategoryPanel(node: node),
+              ),
+              const SizedBox(height: 18),
+            ],
           ],
         );
         final Widget listWithBg = ColoredBox(
@@ -142,51 +150,7 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
     );
   }
 
-  /// 分组标题 + 分割线 + 自适应入口网格。
-  Widget _buildGameGroup(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: _kGroupHorizontal),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          // 分组标题(16sp w600)。
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 10),
-            child: MiuixText(
-              '🎮 游戏工具',
-              style: textStyles.body1.copyWith(
-                color: colors.onSurface,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          // 分割线(outlineVariant 语义近似)。
-          Container(height: 0.5, color: colors.outline.withValues(alpha: 0.35)),
-          const SizedBox(height: 12),
-          // 入口网格:列数与首页网格同源(<600→2 / 600-1099→3 / ≥1100→4)。
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final double availW = constraints.maxWidth;
-              final int cols = gridColumnsForWidth(availW);
-              const double gap = kGridCardGap;
-              final double cellW = (availW - gap * (cols - 1)) / cols;
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: <Widget>[
-                  for (final ToolItem item in kToolCatalog)
-                    SizedBox(
-                      width: cellW,
-                      child: C36ToolEntryButton(item: item),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  /// 工具目录分组（启动已预加载;同步读 Store,永不 loading）。
+  List<ToolCategoryNode> _groups() =>
+      ref.watch(toolCatalogProvider);
 }

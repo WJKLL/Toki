@@ -10,8 +10,8 @@
 //     本文件仅提供顺序与静态文案兜底。
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/tools/tool_catalog_store.dart';
 import '../../domain/entities/home_card.dart';
-import '../../domain/entities/tool_item.dart';
 import 'settings_providers.dart';
 
 /// 默认网格卡顺序(v1.22.0:large 组合卡 / wide 仪表盘 / small×4,
@@ -54,7 +54,7 @@ class HomeToolItemsController extends Notifier<List<String>> {
         .loadHomeToolItems();
     return <String>[
       for (final String id in items)
-        if (ToolItem.byId(id) != null) id,
+        if (ToolCatalogStore.instance.byIdSync(id) != null) id,
     ];
   }
 
@@ -62,7 +62,9 @@ class HomeToolItemsController extends Notifier<List<String>> {
 
   /// 加入首页(未知目录 id 忽略;已加入幂等)。
   Future<void> add(String toolId) async {
-    if (ToolItem.byId(toolId) == null || contains(toolId)) return;
+    if (ToolCatalogStore.instance.byIdSync(toolId) == null || contains(toolId)) {
+      return;
+    }
     final List<String> next = <String>[...state, toolId];
     state = next;
     _persist(next);
@@ -90,7 +92,8 @@ List<HomeCardData> buildDefaultCardsWithTools(List<String> toolIds) {
   return <HomeCardData>[
     ...kDefaultGridCards,
     for (final String id in toolIds)
-      if (ToolItem.byId(id) != null) ToolLaunchCardData(toolId: id),
+      if (ToolCatalogStore.instance.byIdSync(id) != null)
+        ToolLaunchCardData(toolId: id),
   ];
 }
 

@@ -21,9 +21,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../domain/entities/home_card.dart';
-import '../../domain/entities/tool_item.dart';
+import '../../core/tools/tool_catalog_store.dart';
 import '../../core/widgets/mini_toast.dart';
+import '../../domain/entities/home_card.dart';
+import '../../domain/entities/tool_config.dart';
 import '../providers/drag_active_provider.dart';
 import '../providers/home_cards_provider.dart';
 import 'cards/card_class_countdown.dart';
@@ -402,7 +403,8 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
   void _removeTool(ToolLaunchCardData card) {
     unawaited(HapticFeedback.lightImpact());
     unawaited(ref.read(homeToolItemsProvider.notifier).remove(card.toolId));
-    final ToolItem? item = ToolItem.byId(card.toolId);
+    final ToolConfig? item =
+        ToolCatalogStore.instance.byIdSync(card.toolId);
     showMiniToast(context, '已从首页移除 · ${item?.name ?? card.toolId}');
     if (_editing && ref.read(homeToolItemsProvider).isEmpty) {
       _setEditing(false);

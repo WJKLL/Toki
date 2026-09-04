@@ -23,6 +23,7 @@ import '../features/settings/page_p01_02_settings_page.dart';
 import '../features/settings/page_p01_02_01_theme_config_page.dart';
 import '../features/timetable/page_p06_timetable_page.dart';
 import '../features/tools/page_p08_steam_query_page.dart';
+import '../features/tools/page_p09_tool_generic.dart';
 import '../shell/main_shell_page.dart';
 import '../providers/settings_providers.dart';
 import 'miuix_route_transitions.dart';
@@ -42,6 +43,8 @@ const Set<String> _knownPaths = <String>{
   '/settings/theme', // R-08
   '/timetable', // R-10（大课表编辑页，二级页面）
   '/steam', // R-11（v1.34.0 P-08：Steam 用户查询页，二级页面）
+  // R-12（v1.35.0 P-09）：通用工具页为动态路径 /tool/:toolId，不入本集合，
+  //   redirect 中以 /tool/ 前缀放行（见 redirect 分支）。
 };
 
 /// v1.29.0：单一路由页工厂 —— 动效开关开 → MIUI 风格转场；
@@ -72,6 +75,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (path == '/' || path == '/home') return '/?page=0';
       if (path == '/tools') return '/?page=1';
       // v1.13.0：/settings /about 为顶层二级页（菜单进入），不 redirect。
+      // v1.35.0：/tool/:toolId 动态路径（R-12 通用工具页）前缀放行。
+      if (path.startsWith('/tool/')) return null;
       // R-01 '/' 与未知路径统一回主框架首页（§7）。
       if (!_knownPaths.contains(path)) return '/?page=0';
       return null;
@@ -127,6 +132,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: 'R-11',
         pageBuilder: (context, state) =>
             _pageFor(context, const PageP08SteamQueryPage()),
+      ),
+      // v1.35.0（P-09 / R-12）：通用工具页（/tool/:toolId；定制路由工具
+      //   如 Steam 走各自页面，不经此处）。
+      GoRoute(
+        path: '/tool/:toolId',
+        name: 'R-12',
+        pageBuilder: (context, state) {
+          final String toolId = state.pathParameters['toolId'] ?? '';
+          return _pageFor(context, PageP09ToolGenericPage(toolId: toolId));
+        },
       ),
     ],
   );

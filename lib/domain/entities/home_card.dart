@@ -141,9 +141,10 @@ class ClassCountdownCardData extends HomeCardData {
 
 /// v1.34.0(P-08):工具启动卡数据 —— 首页网格尾部动态追加
 /// (settings.homeToolItems 持久化;点击进入工具路由)。
-/// [toolId] = 工具目录 id(ToolItem.id);[id] 派生 `tool_<toolId>`,
+/// [toolId] = 工具目录 id(ToolConfig.id);[id] 派生 `tool_<toolId>`,
 /// 未知 toolId 由 provider 层直接滤除,不产生非法卡。
 /// v1.34.1:移除交互 = 卡片右上 ✕ 一键移除(C-37 内实现);
+/// v1.35.0:目录数据源 ToolItem → ToolConfig(JSON 外部化,见 tool_config.dart)。
 /// 长按 300ms 仍归网格拖拽排序。
 class ToolLaunchCardData extends HomeCardData {
   const ToolLaunchCardData({required this.toolId})

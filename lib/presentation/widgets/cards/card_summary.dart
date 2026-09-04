@@ -116,10 +116,10 @@ class _C27HomeSummaryState extends ConsumerState<C27HomeSummary> {
               ),
               const SizedBox(height: 10),
               // 每日一言:文艺斜体 16,无标题前缀。
+              // v1.35.1:去掉 maxLines 截断 —— 长句卡片高度自适应全部显示
+              // (Column mainAxisSize.min 自然增高,无固定高度约束)。
               MiuixText(
                 quoteText,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 16,
                   fontStyle: FontStyle.italic,
