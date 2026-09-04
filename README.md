@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="96" alt="Toki 图标"/>
+</p>
+
 # Toki（箱具工 → Toki）
 
 **Miuix 风格工具箱（个人使用为主）** · Flutter 应用，Android 11+ / Web
@@ -22,7 +26,14 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 ## 🖼 截图
 
-（待补充 —— 欢迎贡献截图，放置于 `docs/screenshots/`）
+首页卡片网格：长按进入编辑态（卡片微缩、右上 ✕ 移除）。
+
+<img src="docs/screenshots/edit-mode-1.png" width="250" alt="首页编辑态 1"/>
+<img src="docs/screenshots/edit-mode-2.png" width="250" alt="首页编辑态 2"/>
+
+## 🎬 演示
+
+![长按进入编辑态与 ✕ 移除演示](docs/demo/toki-demo.gif)
 
 ---
 
