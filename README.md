@@ -8,7 +8,7 @@
 
 Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：首页仪表盘、课程倒计时、课表管理、每日一言，以及可扩展的「工具页」（当前含 Steam 用户查询）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
 
-下载方式：GitHub/蓝奏云:https://wwami.lanzouq.com/b01giad8ha   密码:e70o
+下载方式：GitHub/蓝奏云:https://wwami.lanzouq.com/b01giad8jc   密码:cvrp
 
 
 > 本仓库为项目开源镜像版本，同步自内部开发主线（当前 v1.34.2）。
