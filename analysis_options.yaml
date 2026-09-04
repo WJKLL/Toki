@@ -1,0 +1,31 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - web/**
+
+linter:
+  rules:
+    # ── PROJECT_SPEC §11 强制编码规范对应的 lint 门禁 ──────────────
+    prefer_const_constructors: true        # §11.2 build 中禁止创建新对象
+    prefer_const_literals_to_create_immutables: true
+    prefer_const_declarations: true        # 静态配置（TextStyle/EdgeInsets/Color）static const
+    use_key_in_widget_constructors: true
+    avoid_print: true                      # 日志统一走 U-08（S-13）
+    prefer_final_fields: true
+    unawaited_futures: true                # 异步写回不得漏处理
+    discarded_futures: true
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options
