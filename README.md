@@ -6,7 +6,7 @@
 
 **Miuix 风格工具箱（个人使用为主，目前还是早期版本功能不多）** · Flutter 应用，Android 11+ / Web
 
-Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：首页仪表盘、课程倒计时、课表管理、每日一言，以及可扩展的「工具页」（**26 个 UAPI 实用工具 / 14 分类**：Steam/MC 查询、必应壁纸、二维码、IP、一言、MD5/Base64/AES、时间戳/农历、翻译、热榜、菜谱、搜索等）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
+Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：首页仪表盘、课程倒计时、课表管理、每日一言，以及可扩展的「工具页」（**100+ 个 UAPI 实用工具 / 14 分类**：Steam/MC 查询、必应壁纸、二维码、IP、一言、MD5/Base64/AES、时间戳/农历、翻译、热榜、菜谱、搜索等）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
 
 下载方式：GitHub/蓝奏云:    (https://wwami.lanzouq.com/b01giaeweh 密码:8jpk)
 
