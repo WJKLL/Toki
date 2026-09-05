@@ -21,6 +21,7 @@ enum ToolCategory {
   time,
   translate,
   daily,
+  dictionary,
   webParse,
   social,
   misc,
@@ -45,6 +46,7 @@ enum ToolCategory {
     ToolCategory.time => '时间',
     ToolCategory.translate => '翻译',
     ToolCategory.daily => '每日',
+    ToolCategory.dictionary => '词典',
     ToolCategory.webParse => '网页解析',
     ToolCategory.social => '社交',
     ToolCategory.misc => '杂项',
@@ -64,6 +66,7 @@ enum ToolCategory {
     ToolCategory.time => 'timer',
     ToolCategory.translate => 'translate',
     ToolCategory.daily => 'months',
+    ToolCategory.dictionary => 'notes',
     ToolCategory.webParse => 'screenCapture',
     ToolCategory.social => 'community',
     ToolCategory.misc => 'gridView',
@@ -165,18 +168,39 @@ class ToolParam {
   }
 }
 
-/// keyValue 模板：单行字段（key = 响应字段名；label = 中文标签）。
+/// keyValue 模板：单行字段（key = 响应字段名/点路径；label = 中文标签；
+/// map = 原始值 → 展示文案的可选映射，如 live_status {0:未开播,1:直播中}）。
 class ToolResultField {
-  const ToolResultField({required this.key, required this.label});
+  const ToolResultField({
+    required this.key,
+    required this.label,
+    this.map,
+  });
 
+  /// 响应字段名，支持点路径（如 'stat.view' / 'results.0.name'）。
   final String key;
   final String label;
+
+  /// 可选枚举值映射（原始字符串 → 中文展示；未命中原样显示）。
+  final Map<String, String>? map;
 
   factory ToolResultField.fromJson(Map<String, dynamic> json) {
     return ToolResultField(
       key: json['key'] as String? ?? '',
       label: json['label'] as String? ?? json['key'] as String? ?? '',
+      map: _stringMap(json['map']),
     );
+  }
+
+  static Map<String, String>? _stringMap(Object? raw) {
+    if (raw is! Map) return null;
+    final Map<String, String> out = <String, String>{};
+    for (final MapEntry<Object?, Object?> e in raw.entries) {
+      if (e.key != null && e.value != null) {
+        out[e.key.toString()] = e.value.toString();
+      }
+    }
+    return out.isEmpty ? null : out;
   }
 }
 
@@ -187,6 +211,10 @@ class ToolResultField {
 ///   - list:    [listPath] 列表字段路径 + [itemTitle]/[itemSubtitle]/[itemUrl]；
 ///   - image:   [source]='body' 渲染响应字节；='field' 渲染 [imageField] 的 URL；
 ///   - json:    无字段（原始 JSON 美化展示）。
+/// v1.38.0(B 批) 增强：key/field/listPath/itemTitle 等全部支持**点路径**
+///   （'a.b' / 'a.0.b'，解锁嵌套结构）；list 支持**标量数组**（元素直接作
+///   标题）；list 缩略图键可自定义（[coverField]，默认 'cover'）；keyValue
+///   字段支持 [ToolResultField.map] 枚举值映射。
 class ToolResult {
   const ToolResult({
     this.field,
@@ -197,6 +225,7 @@ class ToolResult {
     this.itemUrl,
     this.source,
     this.imageField,
+    this.coverField,
   });
 
   final String? field;
@@ -212,6 +241,9 @@ class ToolResult {
   /// image 且 source='field' 时的字段名（如 B站 face）。
   final String? imageField;
 
+  /// list 项缩略图字段名（默认 'cover'，如网页图片提取 'thumb'）。
+  final String? coverField;
+
   factory ToolResult.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const ToolResult();
     return ToolResult(
@@ -226,6 +258,7 @@ class ToolResult {
       itemUrl: json['itemUrl'] as String?,
       source: json['source'] as String?,
       imageField: json['imageField'] as String?,
+      coverField: json['coverField'] as String?,
     );
   }
 }
@@ -348,6 +381,7 @@ class ToolConfig {
         for (final ToolResultField f in result.fields) <String, dynamic>{
           'key': f.key,
           'label': f.label,
+          'map': f.map,
         },
       ],
       'listPath': result.listPath,
@@ -356,6 +390,7 @@ class ToolConfig {
       'itemUrl': result.itemUrl,
       'source': result.source,
       'imageField': result.imageField,
+      'coverField': result.coverField,
     },
   };
 }

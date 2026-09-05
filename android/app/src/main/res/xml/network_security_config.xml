@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.38.0(B 批 UAPI 扩展):工具图床 http 明文白名单 ——
+     Android 9+ 默认禁明文流量,而 B站封面(pic/cover/face)经
+     i*.hdslb.com、QQ 头像经 qlogo.cn 返回 http:// 链接。
+     仅放行可信图床,其余流量仍禁明文(https 不受影响)。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">hdslb.com</domain>
+        <domain includeSubdomains="true">qlogo.cn</domain>
+        <domain includeSubdomains="true">textures.minecraft.net</domain>
+    </domain-config>
+</network-security-config>

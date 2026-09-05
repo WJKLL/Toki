@@ -41,6 +41,8 @@ class SettingsRepositoryImpl implements SettingsRepository {
   static const String _kQuoteStyle = 'settings.quoteStyle';
   // v1.27.0:语言档(仅 UAPI 生效;'zh'/'en'/'mix')。
   static const String _kQuoteLang = 'settings.quoteLang';
+  // v1.36.0:课程提醒总开关。
+  static const String _kCourseReminderEnabled = 'settings.courseReminderEnabled';
 
   Timer? _debounce;
   AppSettings? _pending;
@@ -72,6 +74,8 @@ class SettingsRepositoryImpl implements SettingsRepository {
       quoteApi: _prefs.getString(_kQuoteApi) ?? 'hitokoto',
       quoteStyle: _prefs.getString(_kQuoteStyle) ?? 'classic',
       quoteLang: _prefs.getString(_kQuoteLang) ?? 'zh',
+      courseReminderEnabled:
+          _prefs.getBool(_kCourseReminderEnabled) ?? true,
     );
   }
 

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "新手开发流程:从「想改个功能」到「发版成功」",
+    "quality_profile": "showcase",
+    "viewBox": [980, 630],
+    "views": [
+      { "id": "main-road", "label": "主线:看懂 → 改 → 发", "focus": ["know", "find", "edit", "run", "check", "release", "done"], "note": "从读文档认路开始,一路走到真机验收通过。" },
+      { "id": "loop-back", "label": "不满意就回到改", "focus": ["run", "edit", "check"], "note": "效果不满意或有告警,虚线回到「动手改代码」重来。" },
+      { "id": "gate-ship", "label": "门禁与发版", "focus": ["check", "release", "done"], "note": "静态检查 0 告警后,升版本、构建、复制发布包,再装机验收。" }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "开发主流程(你)" },
+    { "id": "tools", "label": "检查与发版(工具)" },
+    { "id": "terminal", "label": "终态" }
+  ],
+  "states": [
+    { "id": "know", "type": "start", "label": "看懂再动手", "sublabel": "读 CODE_REFERENCE.md", "lane": "main", "col": 0, "step": "01", "tag": "文件地图" },
+    { "id": "find", "type": "active", "label": "查修改指南", "sublabel": "按编号定位文件", "lane": "main", "col": 1, "step": "02" },
+    { "id": "edit", "type": "active", "label": "动手改代码", "sublabel": "沿用同文件风格", "lane": "main", "col": 2, "step": "03" },
+    { "id": "run", "type": "decision", "label": "跑起来看效果", "sublabel": "flutter run 热重载", "lane": "main", "col": 3, "step": "04", "tag": "循环核心" },
+    { "id": "check", "type": "active", "label": "静态检查", "sublabel": "flutter analyze", "lane": "tools", "col": 1, "width": 122, "tag": "门禁" },
+    { "id": "release", "type": "active", "label": "升版本号+出包", "sublabel": "版本+日志→构建→发布包", "lane": "tools", "col": 2, "width": 122, "tag": "只升不降" },
+    { "id": "done", "type": "success", "label": "验收通过", "sublabel": "真机确认,发版完成", "lane": "terminal", "col": 2, "tag": "🎉" }
+  ],
+  "transitions": [
+    { "from": "know", "to": "find" },
+    { "from": "find", "to": "edit" },
+    { "from": "edit", "to": "run" },
+    { "from": "run", "to": "check", "label": "效果没问题", "route": "drop", "fromSide": "bottom", "toSide": "top", "labelAt": [592, 233] },
+    { "from": "check", "to": "release" },
+    { "from": "release", "to": "done", "label": "装机验收", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top", "labelAt": [710, 393] },
+    { "from": "run", "to": "edit", "label": "不满意?回去改", "variant": "dashed", "route": "auto", "fromSide": "top", "toSide": "top", "via": [[556, 95], [402, 95]], "labelAt": [479, 80] },
+    { "from": "check", "to": "edit", "label": "有告警?回去改", "variant": "dashed", "route": "auto", "fromSide": "bottom", "toSide": "bottom", "via": [[556, 390], [402, 390]], "labelAt": [479, 372] }
+  ]
+}

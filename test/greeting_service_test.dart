@@ -11,7 +11,9 @@ void main() {
 
   test('春节日(2026-02-17)命中节日文案', () {
     final String text = at(DateTime(2026, 2, 17, 9)).greetingFor();
-    expect(text, endsWith('，XX'));
+    // v1.38.1:未传用户名 → 无 'XX' 占位尾缀。
+    expect(text, isNot(endsWith('，XX')));
+    expect(text, isNot(contains('XX')));
     expect(
       text,
       anyOf(contains('春节'), contains('新年'), contains('恭喜'), contains('马年')),
@@ -19,16 +21,16 @@ void main() {
   });
 
   test('节气日(2026-03-20 春分)命中节气文案', () {
-    expect(at(DateTime(2026, 3, 20, 12)).greetingFor(), '今日春分，XX');
+    expect(at(DateTime(2026, 3, 20, 12)).greetingFor(), '今日春分');
   });
 
   test('节气容差窗口(2026-03-21)仍命中(日期表精度容差)', () {
-    expect(at(DateTime(2026, 3, 21, 12)).greetingFor(), '今日春分，XX');
+    expect(at(DateTime(2026, 3, 21, 12)).greetingFor(), '今日春分');
   });
 
   test('普通日按时段(2026-04-10 上午)', () {
     final String text = at(DateTime(2026, 4, 10, 10)).greetingFor();
-    expect(text, endsWith('，XX'));
+    expect(text, isNot(endsWith('，XX')));
     expect(
       text,
       anyOf(contains('上午'), contains('元气'), contains('晨'), contains('精神')),

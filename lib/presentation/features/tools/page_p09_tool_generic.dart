@@ -79,12 +79,8 @@ class _PageP09ToolGenericPageState
   void initState() {
     super.initState();
     _tool = ToolCatalogStore.instance.byIdSync(widget.toolId);
-    // 预填默认值(select default / translate to_lang 等)。
-    final Map<String, String> init = <String, String>{};
-    for (final ToolParam p in _tool?.params ?? const <ToolParam>[]) {
-      if (p.defaultValue != null) init[p.name] = p.defaultValue!;
-    }
-    _values = init;
+    // v1.38.1:不再预填 defaultValue(输入框空、提交时兜底,见 _submit);
+    // select 默认选中在 C-40 内部维护,提交兜底同覆盖。
     // 无参工具:进页自动请求一次(首帧后,目录已预加载)。
     if ((_tool?.params.isEmpty ?? false)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -124,9 +120,17 @@ class _PageP09ToolGenericPageState
     try {
       // 实时读 UAPI key（加密存储,与 P-08 同款;匿名可用）。
       final String? key = await ref.read(steamAuthServiceProvider).readApiKey();
+      // v1.38.1:空值参数兜底 defaultValue(text 框不再预填,留空即用默认)。
+      final Map<String, String> send = Map<String, String>.of(_values);
+      for (final ToolParam p in tool.params) {
+        final String v = send[p.name] ?? '';
+        if (v.trim().isEmpty && p.defaultValue != null) {
+          send[p.name] = p.defaultValue!;
+        }
+      }
       final ToolApiResult result = await ref
           .read(toolApiServiceProvider)
-          .call(tool: tool, values: _values, apiKey: key);
+          .call(tool: tool, values: send, apiKey: key);
       if (!mounted) return;
       setState(() {
         _result = result;

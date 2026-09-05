@@ -57,6 +57,38 @@ const String _kSeedJson = '''
           }
         }
       ]
+    },
+    {
+      "id": "enhanced",
+      "name": "增强",
+      "icon": "notes",
+      "tools": [
+        {
+          "id": "nested_kv",
+          "name": "嵌套取值",
+          "summary": "点路径 + 枚举映射 + 数字截断",
+          "apiPath": "/api/v1/test/nested",
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "data.stat.view", "label": "播放" },
+              { "key": "owner.name", "label": "UP 主" },
+              { "key": "data.live_status", "label": "状态", "map": { "0": "未开播", "1": "直播中" } },
+              { "key": "data.avg", "label": "平均延迟" }
+            ]
+          }
+        },
+        {
+          "id": "scalar_list",
+          "name": "标量列表",
+          "summary": "数字数组逐行展示",
+          "apiPath": "/api/v1/test/numbers",
+          "displayType": "list",
+          "result": {
+            "listPath": "numbers"
+          }
+        }
+      ]
     }
   ]
 }
@@ -120,6 +152,20 @@ void main() {
                     headers: jsonHeaders,
                   );
                 }
+                if (path == '/api/v1/test/nested') {
+                  return http.Response(
+                    '{"owner":{"name":"张三"},"data":{"stat":{"view":123456},"live_status":1,"avg":70.683893001}}',
+                    200,
+                    headers: jsonHeaders,
+                  );
+                }
+                if (path == '/api/v1/test/numbers') {
+                  return http.Response(
+                    '{"numbers":[7,6,1]}',
+                    200,
+                    headers: jsonHeaders,
+                  );
+                }
                 return http.Response(
                   '{"code":"NOT_FOUND"}',
                   404,
@@ -147,9 +193,10 @@ void main() {
   testWidgets('工具页:分类默认折叠,点击展开出现 C-36 入口', (tester) async {
     await pumpApp(tester);
     await switchTab(tester, '工具');
-    // 分组标题存在。
-    expect(find.byType(C42ToolCategoryPanel), findsOneWidget);
+    // 分组标题存在(文本 + 增强 两个分类)。
+    expect(find.byType(C42ToolCategoryPanel), findsNWidgets(2));
     expect(find.text('文本'), findsOneWidget);
+    expect(find.text('增强'), findsOneWidget);
     // 默认折叠:入口按钮不可见。
     expect(find.byType(C36ToolEntryButton), findsNothing);
     // 点击分类头展开 → C-36 出现。
@@ -201,6 +248,37 @@ void main() {
     expect(find.text('中国 广东 肇庆'), findsOneWidget);
     // 自动请求后按钮文案为刷新。
     expect(find.textContaining('刷新'), findsOneWidget);
+    await settleTimers(tester);
+  });
+
+  testWidgets('增强:点路径/枚举映射/数字截断 keyValue(v1.38.0)', (tester) async {
+    await pumpApp(tester);
+    await switchTab(tester, '工具');
+    await tester.tap(find.text('增强'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('嵌套取值'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    // 点路径取值(data.stat.view / owner.name)。
+    expect(find.text('123456'), findsOneWidget);
+    expect(find.text('张三'), findsOneWidget);
+    // 枚举值映射 live_status 1 → 直播中。
+    expect(find.text('直播中'), findsOneWidget);
+    // 长小数截断 70.683893001 → 70.68。
+    expect(find.text('70.68'), findsOneWidget);
+    await settleTimers(tester);
+  });
+
+  testWidgets('增强:标量数组逐行 list(v1.38.0)', (tester) async {
+    await pumpApp(tester);
+    await switchTab(tester, '工具');
+    await tester.tap(find.text('增强'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.tap(find.text('标量列表'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    // 数字数组 [7,6,1] 每元素一行标题。
+    expect(find.text('7'), findsOneWidget);
+    expect(find.text('6'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
     await settleTimers(tester);
   });
 }

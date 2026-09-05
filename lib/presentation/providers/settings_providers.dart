@@ -99,6 +99,11 @@ class AppSettingsController extends Notifier<AppSettings> {
   void setQuoteEnabled(bool enabled) =>
       _update(state.copyWith(quoteEnabled: enabled));
 
+  // ── v1.36.0：课程提醒开关 ────────────────────────────────────
+
+  void setCourseReminderEnabled(bool enabled) =>
+      _update(state.copyWith(courseReminderEnabled: enabled));
+
   /// 切换 API 来源（白名单校验）;风格联动:
   /// 目标 API 支持多风格且当前风格不在其支持集 → 回落到该 API 默认风格;
   /// 固定风格 API(支持集为空)→ 风格键保留不动(风格行隐藏)。

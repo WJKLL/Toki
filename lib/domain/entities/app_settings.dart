@@ -39,6 +39,7 @@ class AppSettings {
     this.quoteApi = 'hitokoto',
     this.quoteStyle = 'classic',
     this.quoteLang = 'zh',
+    this.courseReminderEnabled = true,
   });
 
   /// UI 模式（跟随系统 / 浅色 / 深色）。
@@ -85,6 +86,9 @@ class AppSettings {
   /// 每日一言语言档键（v1.27.0，S-21，仅 UAPI 生效；'zh'/'en'/'mix'）。
   final String quoteLang;
 
+  /// v1.36.0：课程提醒总开关（到点闹钟 + 上课常驻通知；默认开）。
+  final bool courseReminderEnabled;
+
   static const double kPageScaleMin = 0.8;
   static const double kPageScaleMax = 1.2;
 
@@ -103,6 +107,7 @@ class AppSettings {
     String? quoteApi,
     String? quoteStyle,
     String? quoteLang,
+    bool? courseReminderEnabled,
   }) {
     return AppSettings(
       uiMode: uiMode ?? this.uiMode,
@@ -118,6 +123,7 @@ class AppSettings {
       quoteApi: quoteApi ?? this.quoteApi,
       quoteStyle: quoteStyle ?? this.quoteStyle,
       quoteLang: quoteLang ?? this.quoteLang,
+      courseReminderEnabled: courseReminderEnabled ?? this.courseReminderEnabled,
     );
   }
 
@@ -137,6 +143,7 @@ class AppSettings {
             other.quoteApi == quoteApi &&
             other.quoteStyle == quoteStyle &&
             other.quoteLang == quoteLang &&
+            other.courseReminderEnabled == courseReminderEnabled &&
             listEquals(other.classPeriods, classPeriods);
   }
 
@@ -154,6 +161,7 @@ class AppSettings {
     quoteApi,
     quoteStyle,
     quoteLang,
+    courseReminderEnabled,
     Object.hashAll(classPeriods),
   );
 }

@@ -12,13 +12,16 @@
 //   - 字段缺失防御跳过;组件只读渲染,刷新/重试在 P-09。
 import 'dart:async' show unawaited;
 import 'dart:convert';
+import 'dart:typed_data' show Uint8List;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart'
     show Clipboard, ClipboardData;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/media/image_saver_service.dart';
 import '../../core/tools/tool_api_service.dart';
 import '../../core/widgets/app_icons.dart';
 import '../../core/widgets/c03_group_card.dart';
@@ -55,27 +58,27 @@ class C41ToolResultDisplay extends StatelessWidget {
     };
   }
 
-  // ── image（两态）──────────────────────────────────────────────
+  // ── image（两态；v1.40.0 长按保存到相册/下载）──────────────────
 
   Widget _buildImage(BuildContext context) {
     final MiuixColors colors = MiuixTheme.of(context).colors;
     // field 模式:URL 取自响应字段(如随机图封面/头像类接口未来用)。
     final bool fieldMode = tool.result.source == 'field';
     final Widget? child;
+    Uint8List? saveBytes; // body 字节(直接保存)。
+    String? saveUrl; // field URL(保存时先下载)。
     if (fieldMode) {
-      final Object? url = _map(result.json)?.containsKey(
-            tool.result.imageField ?? '',
-          ) == true
-          ? _map(result.json)![tool.result.imageField!]
-          : null;
-      child = (url is String && url.isNotEmpty)
+      final Object? url = _at(result.json, tool.result.imageField ?? '');
+      saveUrl = (url is String && url.isNotEmpty) ? url : null;
+      child = saveUrl != null
           ? Image.network(
-              url,
+              saveUrl,
               fit: BoxFit.contain,
               errorBuilder: (_, _, _) => _placeholder(context, '图片加载失败'),
             )
           : _placeholder(context, '无图片地址');
     } else if (result.bytes != null) {
+      saveBytes = result.bytes;
       child = Image.memory(
         result.bytes!,
         fit: BoxFit.contain,
@@ -85,25 +88,79 @@ class C41ToolResultDisplay extends StatelessWidget {
     } else {
       child = _placeholder(context, '无图片数据');
     }
+    final bool savable = saveBytes != null || saveUrl != null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: C03GroupCard(
         children: <Widget>[
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 160, maxHeight: 420),
-              child: Container(
-                width: double.infinity,
-                color: colors.surfaceContainerHigh.withValues(alpha: 0.5),
-                alignment: Alignment.center,
-                child: child,
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: savable
+                ? () => _saveImage(context, saveBytes, saveUrl)
+                : null,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: 160,
+                  maxHeight: 420,
+                ),
+                child: Container(
+                  width: double.infinity,
+                  color: colors.surfaceContainerHigh.withValues(alpha: 0.5),
+                  alignment: Alignment.center,
+                  child: child,
+                ),
               ),
             ),
           ),
+          if (savable) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                MiuixIcon(
+                  vector: appIcon('download'),
+                  size: 12,
+                  tint: colors.onSurfaceVariantSummary,
+                ),
+                const SizedBox(width: 5),
+                MiuixText(
+                  '长按图片保存',
+                  fontSize: 11,
+                  color: colors.onSurfaceVariantSummary,
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 长按保存：body 字节直存 / field URL 先下载；结果轻提示。
+  Future<void> _saveImage(
+    BuildContext context,
+    Uint8List? bytes,
+    String? url,
+  ) async {
+    final String base =
+        'toki_${tool.id}_${DateTime.now().millisecondsSinceEpoch}';
+    final String? saved = await ImageSaverService.saveImage(
+      bytes: bytes,
+      url: url,
+      baseName: base,
+    );
+    if (!context.mounted) return;
+    if (saved == null) {
+      showMiniToast(context, '正在保存…'); // 防重入(上一次进行中)。
+      return;
+    }
+    if (saved.startsWith('保存失败') || saved.startsWith('下载失败')) {
+      showMiniToast(context, saved);
+      return;
+    }
+    showMiniToast(context, kIsWeb ? '已开始下载' : '已保存到相册');
   }
 
   Widget _placeholder(BuildContext context, String text) {
@@ -124,15 +181,26 @@ class C41ToolResultDisplay extends StatelessWidget {
     if (json == null) return null;
     final String? field = tool.result.field;
     if (field == null || field.isEmpty) return null;
-    final Object? v = json[field];
+    final Object? v = _at(json, field);
     if (v == null) return null;
     return _displayString(v);
   }
 
+  /// 值 → 展示文本：字符串原样；bool 是/否；数字整值原样、小数保留 2 位
+  /// （尾零去除，v1.38.0 起，避免延迟/评分等长小数撑爆行宽）；
+  /// 其余（数组/对象）JSON 缩进。
   String _displayString(Object v) {
     if (v is String) return v;
     if (v is bool) return v ? '是' : '否';
-    if (v is num) return v.toString();
+    if (v is num) {
+      final double d = v.toDouble();
+      if (d == d.roundToDouble()) return d.toInt().toString();
+      String s = d.toStringAsFixed(2);
+      if (s.contains('.')) {
+        s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+      }
+      return s;
+    }
     return const JsonEncoder.withIndent('  ').convert(v);
   }
 
@@ -195,9 +263,9 @@ class C41ToolResultDisplay extends StatelessWidget {
     final Widget? head = _buildHeadImage(context, json);
     final List<Widget> rows = <Widget>[];
     for (final ToolResultField f in tool.result.fields) {
-      final Object? v = json?[f.key];
+      final Object? v = _at(json, f.key);
       if (v == null) continue; // 字段缺失跳过。
-      rows.add(_kvRow(context, f.label, _displayString(v)));
+      rows.add(_kvRow(context, f.label, _kvDisplay(f, v)));
     }
     if (rows.isEmpty && head == null) {
       return _placeholder(context, '无返回数据');
@@ -213,6 +281,17 @@ class C41ToolResultDisplay extends StatelessWidget {
     );
   }
 
+  /// 字段展示值：优先命中的 valueMap 映射，否则原值格式化。
+  String _kvDisplay(ToolResultField f, Object v) {
+    final Map<String, String>? m = f.map;
+    if (m != null && m.isNotEmpty) {
+      final String raw = v is String ? v : v.toString();
+      final String? mapped = m[raw];
+      if (mapped != null) return mapped;
+    }
+    return _displayString(v);
+  }
+
   /// 可选头图（result.imageField 存在且响应含 URL 字段 → 圆头像）。
   Widget? _buildHeadImage(
     BuildContext context,
@@ -220,7 +299,7 @@ class C41ToolResultDisplay extends StatelessWidget {
   ) {
     final String? field = tool.result.imageField;
     if (field == null || field.isEmpty || json == null) return null;
-    final Object? url = json[field];
+    final Object? url = _at(json, field);
     if (url is! String || url.isEmpty) return null;
     final MiuixColors colors = MiuixTheme.of(context).colors;
     return Padding(
@@ -314,10 +393,11 @@ class C41ToolResultDisplay extends StatelessWidget {
     );
   }
 
+  /// 列表取数组：listPath 支持点路径；标量数组（数字/字符串列表）直接取。
   List<Object?>? _listItems(Map<String, dynamic>? json) {
     final String? path = tool.result.listPath;
     if (path == null || path.isEmpty || json == null) return null;
-    final Object? v = json[path];
+    final Object? v = _at(json, path);
     return v is List<Object?> ? v : null;
   }
 
@@ -325,17 +405,20 @@ class C41ToolResultDisplay extends StatelessWidget {
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final Map<String, dynamic>? item =
         raw is Map<String, dynamic> ? raw : null;
-    final String title =
-        item != null ? _displayString(item[tool.result.itemTitle] ?? '') : '';
+    // 标量项（如随机数数组）：元素自身即标题；Map 项按配置字段取。
+    final String title = item != null
+        ? _itemField(item, tool.result.itemTitle)
+        : _displayString(raw!);
     final String subtitle = item != null && tool.result.itemSubtitle != null
-        ? _displayString(item[tool.result.itemSubtitle!] ?? '')
+        ? _itemField(item, tool.result.itemSubtitle!)
         : '';
-    final Object? urlObj =
-        item != null && tool.result.itemUrl != null
-            ? item[tool.result.itemUrl!]
-            : null;
+    final Object? urlObj = item != null && tool.result.itemUrl != null
+        ? _at(item, tool.result.itemUrl!)
+        : null;
     final String? url = urlObj is String && urlObj.isNotEmpty ? urlObj : null;
-    final Object? coverObj = item?['cover'];
+    final Object? coverObj = item != null
+        ? _at(item, tool.result.coverField ?? 'cover')
+        : null;
     final String? cover = coverObj is String && coverObj.isNotEmpty
         ? coverObj
         : null;
@@ -405,6 +488,14 @@ class C41ToolResultDisplay extends StatelessWidget {
     );
   }
 
+  /// 从列表项 Map 取展示字段（点路径），缺失空串。
+  String _itemField(Map<String, dynamic> item, String? field) {
+    if (field == null || field.isEmpty) return '';
+    final Object? v = _at(item, field);
+    if (v == null) return '';
+    return _displayString(v);
+  }
+
   Future<void> _openItem(BuildContext context, String title, String? url) async {
     if (url != null) {
       final Uri? uri = Uri.tryParse(url);
@@ -453,4 +544,23 @@ class C41ToolResultDisplay extends StatelessWidget {
 
   Map<String, dynamic>? _map(Object? json) =>
       json is Map<String, dynamic> ? json : null;
+
+  /// 点路径取值（v1.38.0）：'a.b' / 'a.0.b'（数字段走 List 下标）；
+  /// Map/List 混走，缺失或类型不符返回 null。
+  Object? _at(Object? root, String path) {
+    if (root == null || path.isEmpty) return null;
+    Object? cur = root;
+    for (final String seg in path.split('.')) {
+      if (cur is Map) {
+        cur = cur[seg];
+      } else if (cur is List) {
+        final int? i = int.tryParse(seg);
+        if (i == null || i < 0 || i >= cur.length) return null;
+        cur = cur[i];
+      } else {
+        return null;
+      }
+    }
+    return cur;
+  }
 }

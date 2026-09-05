@@ -50,7 +50,7 @@ class C31AgreementCard extends StatefulWidget {
 }
 
 class _C31AgreementCardState extends State<C31AgreementCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   /// 遮罩渐入(0→0.5,200ms)与卡片滑入(300ms)分控,退出同步反向。
   late final AnimationController _mask = AnimationController(
     vsync: this,

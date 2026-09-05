@@ -40,7 +40,10 @@ class _C40ToolDynamicParamsState extends State<C40ToolDynamicParams> {
     super.initState();
     for (final ToolParam p in widget.params) {
       if (p.type == ToolParamType.text || p.type == ToolParamType.number) {
-        _controllers[p.name] = TextEditingController(text: p.defaultValue);
+        // v1.38.1:defaultValue 不再预填进输入框(提交时为空才兜底,
+        // 见 P-09)——避免「默认文本残留需手动删除」;默认值改由
+        // label 尾缀提示(如「最小值 · 默认 1」)。
+        _controllers[p.name] = TextEditingController();
       } else if (p.type == ToolParamType.select &&
           p.options.isNotEmpty &&
           p.defaultValue != null) {
@@ -94,11 +97,13 @@ class _C40ToolDynamicParamsState extends State<C40ToolDynamicParams> {
   }
 
   Widget _buildTextField(BuildContext context, ToolParam p) {
+    // v1.39.0:弃用 useLabelAsPlaceholder —— flutter_miuix 1.1.1 该模式下
+    //   text 从空变非空时不触发重建(label 残留灰字遮挡输入,真机反馈)。
+    //   改用标准浮动 label:空态灰字提示,输入后 label 上浮小字不遮挡。
     return MiuixTextField(
       key: ValueKey<String>('toolParam.${p.name}'),
       controller: _controllers[p.name],
       label: p.label,
-      useLabelAsPlaceholder: true,
       singleLine: true,
       textInputAction: TextInputAction.done,
       onChanged: (_) => _emit(),

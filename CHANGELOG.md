@@ -2,6 +2,102 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.40.0（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **工具图片长按保存**：C-41 image 模板(壁纸/二维码/随机图/新闻图/Gravatar 等)图下新增「长按图片保存」提示 —— Android 原生 MediaStore 存相册 `Pictures/Toki`(Android 10+ 免权限,minSdk 30 恒可用,字节直存防二次网络);Web file_picker 触发浏览器下载;field URL 图先下载后存;扩展名按图片魔数推断(png/jpg/gif/webp/bmp);防重入(保存中忽略) + 结果轻提示 | C-41 / F-01 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.39.0+132` → `1.40.0+133`(功能 → Minor,§1.3;只升不降)。
+- 新文件：`core/media/image_saver_service.dart`(全平台保存服务);`MainActivity` 新增 `xiangjugong/media` channel + `saveImageToGallery`。
+
+## v1.39.0（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **输入框占位不再遮挡输入**：flutter_miuix 1.1.1 `useLabelAsPlaceholder` 缺陷(文本从空变非空不触发重建,灰字 label 残留盖住输入)——工具参数输入框弃用该模式,改标准**浮动 label**(输入后上浮小字不遮挡) | C-40 / P-09 | Android 11+ / Web |
+| 功能 | **关于页补全**：顶部应用标识换**真实启动图标**(asset 化,Web 同步可用);信息卡升级为可点击跳转行 —— GitHub 仓库(github.com/WJKLL/Toki) / 发布记录(Releases) / 官方网站(toki.omjl.top),行尾箭头 + 外开浏览器,失败轻提示;开源许可保留文案 | P-01-03 | Android 11+ / Web |
+| 修复 | 常量更正:`projectUrl/changelogUrl` example 占位 → 真实开源仓库;`buildNumber` 同步 132(此前滞留 128 致关于页版本号 `+N` 失真) | F-01 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.38.1+131` → `1.39.0+132`(功能+修复 → Minor,§1.3;只升不降)。
+- 新资源：`assets/images/app_icon.png`(启动图标 192px 复制,pubspec 注册)。
+- 注：P-08 Steam 查询 / C-39 密钥弹层输入框同用 `useLabelAsPlaceholder`,存在同类遮挡缺陷(输入后 label 残留),待真机确认后一并切换浮动 label。
+
+## v1.38.1（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **输入框不再预填默认值**：text/number 参数 defaultValue(翻译 zh/随机数 1-100-3 等)不再作为真实内容填进输入框(此前需手动删除)——输入框始终干净,留空提交时自动兜底默认值;select 默认选中不受影响 | C-40 / P-09 | Android 11+ / Web |
+| 修复 | **问候语去除 'XX' 占位尾缀**：未设置用户名时问候语仅显示文案本体(如「晚上好，今天辛苦啦」),不再拼「，XX」;设置用户名(预留)时仍拼「文案，名字」 | S-22 / C-27 | Android 11+ / Web |
+| 修复 | **UAPI 请求网络抖动自愈**：超时 10s → 15s;网络层错误(超时/连接失败)自动重试 1 次 —— 缓解 MC 曾用名等依赖上游国际服务的接口偶发无响应 | P-09 / T-03 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.38.0+130` → `1.38.1+131`(修复 → Patch,§1.3;只升不降)。
+
+## v1.38.0（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **UAPI 工具目录扩展 B 批（+14，总数 62；新增「词典」分类）**：天气(实时温湿/风力)、AI 翻译(风格可选)、单词词典(音标+释义,新分类)、文本分析(字数统计)、Markdown→HTML、AES 高级加/解密(模式/填充可选)、B站视频(封面+播放/点赞嵌套数据)、B站直播间(状态中文映射)、B站投稿、Ping 测试(延迟小数格式化)、MC 曾用名(改名史)、Steam 游戏服务器、MC Mod 搜索(来源切换+图标)；随机数升级为逐行列表 | P-01-04 / F-04 / P-09 | Android 11+ / Web |
+| 增强 | **结果渲染管道四扩展**：①字段**点路径**取值('owner.name'/'stat.view'/'results.0.history'/'data.translated_text' 解锁嵌套结构) ②keyValue **枚举值映射**(map: 0→未开播…) ③数字展示**截断 2 位**(Ping 延迟 70.683893→70.68) ④list **标量数组**逐行 + 缩略图键可配(coverField) | C-41 / F-04 | Android 11+ / Web |
+| 安全 | **图床 http 白名单**(networkSecurityConfig)：仅放行 hdslb.com(封/头像)/qlogo.cn(QQ 头像)/textures.minecraft.net(皮肤)，其余流量仍禁明文 | — | Android 11+ |
+| 测试 | +2 通用页增强用例(点路径/映射/截断/标量数组)，79 项全绿 | — | - |
+
+### 涉及编号变更
+- 版本：`1.37.0+129` → `1.38.0+130`(功能 → Minor,§1.3;只升不降)。
+- 数据：`assets/tools/tools.json` 48 → 62 条(新增 dictionary 分类;`ToolCategory` +dictionary)。
+- 新资源：`res/xml/network_security_config.xml`(manifest 挂接)。
+- 上轮暂缓项落地：MC 曾用名/B站视频/直播间/投稿(点路径)、Ping(数字截断)、随机数(标量数组)。
+- 评估后不做：节假日日历(调休上班/放假同字段,list 单副行无法表达,需后续双标签扩展)、B站评论(aid 输入门槛)、网页图片提取(输出同图多格式变体+需网格模板)、收视排行(与票房榜重复)、快递物流查询(差真实单号样本)、微信域名检测(上游 503 不稳)、QQ 群(无公开实测样本)。
+
+## v1.37.0（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **UAPI 工具目录扩展 A 批（+21，总数 48）**：v1.35 通用管道纯数据驱动扩容 —— 游戏类 +Epic 免费游戏(列表+封面)/MC 版本/玩家/基岩版服务器;社交 +GitHub 用户(头像)/仓库/QQ 信息;网络 +ICP 备案/DNS 解析(记录类型选择)/WHOIS 全文/URL 状态码检测;杂项 +手机号归属/快递公司识别/实时电影票房榜/日期差/随机数/程序员历史(今日+任意日期,大事记列表);文本 +MD5 校验(是/否)/敏感词检测打码;图片 +Gravatar 头像。全部接口 curl 实测字段映射(displayType/listPath/fields),零 Dart 改动 | P-01-04 / F-04 / P-09 / C-40 / C-41 | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.36.1+128` → `1.37.0+129`(功能 → Minor,§1.3;只升不降)。
+- 数据：`assets/tools/tools.json` 27 → 48 条(6 分类扩展;测试 fixture 独立不受影响)。
+- 暂缓清单(结构需管道增强,随 B/C 批落地)：MC 曾用名/B站视频/直播间/QQ 群(嵌套字段)、Ping(小数精度)、随机数列表化(json 兜底中)、快递物流查询(需真实单号实测)、词典(深嵌套专用卡)、摸摸头动图(GIF 帧动画)、微信域名检测(上游 503 不稳)。
+
+## v1.36.1（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 视觉 | **设置页「通知」组整合**：课程到点提醒**总开关**(用户定开/关)—— 关闭时整组收敛一行;开启后引导三步保活(自启动/省电无限制/通知+精确闹钟,一键跳转);原散落 4 个测试按钮收敛为「开发者测试/诊断」弹层;诊断摘要上移行副文案 | P-01-02 | Android 11+ / Web |
+| 清理 | 移除废弃/历史完成文档(PLAN_super_island/PLAN_v1.21/1.22/FLASH_EXECUTION)与 docs 渲染检查残留(visual-check.*)—— git 历史可恢复;保留近期 PLAN 与扩展能力代码 | — | - |
+
+### 涉及编号变更
+- 版本：`1.36.0+127` → `1.36.1+128`(布局/清理 → Patch,§1.3;只升不降)。
+- 发布体积：日常包改 **arm64-only** 构建(`--target-platform android-arm64`,约 20MB,-67%);全量多 ABI 包按需构建。
+
+## v1.36.0（2026-09-05）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **课程到点提醒（AlarmManager）**：设置页「课程到点提醒」总开关(默认开,S-02 `settings.courseReminderEnabled`)—— 顶层常驻桥(CourseReminderBridge)监听课表/周次/节次变化,排**今天剩余+明天全部**课程开始时刻闹钟(系统闹钟档 `setAlarmClock`,权限不足逐级降级 exact/普通 set);闹钟清单持久化,**开机/应用更新/时间变更自动重排**;到点弹「课程名 · 第N-M节 · HH:mm 开始」通知(点击回应用) | P-01-01 内部件 / S-02 | Android 11+ |
+| 功能 | **上课常驻通知(自治倒计时)**：上课中(CurrentClass 非空)→ 原生前台服务(specialUse)常驻通知「课程名 + 剩余 N 分钟(P%) + 节次/结束时间」——**原生按墙钟自治更新**(endAt+total 推算,不依赖 Dart 生命周期,进程被保活即持续更新,endAt 到自动停),下课自动消失 | P-01-01 内部件 | Android 11+ |
+| 功能 | **后台可靠性引导 + 退出隐身**：设置页课程提醒组三步引导(①自启动/后台 ②省电策略无限制[电池优化跳转] ③通知/精确闹钟,各一键跳系统设置);`MainActivity` 加 `excludeFromRecents`(退出后不出现在最近任务,配合通知/桌面图标使用,教程页说明) | P-01-02 | Android 11+ |
+| 修复 | **协议卡 C-31 崩溃(存量 bug)**:`SingleTickerProviderStateMixin` 配 2 个 AnimationController → 卸载重装/协议重弹时断言红屏;改 `TickerProviderStateMixin` | C-31 / P-07 | Android 11+ / Web |
+| 修复 | MethodChannel Integer/Long 转换:小数值 Dart int(updateIntervalMs)在 Android 解码为 Integer,`argument<Long>` 抛 ClassCastException → 按 Int 读取转 Long | P-01-01 内部件 | Android 11+ |
+| 移除 | **桌面小组件**（v1.36 尝试后移除）：MIUI 桌面 RemoteViews 对嵌套布局/Bitmap/动态资源渲染不稳定(空白/塌陷/透明反复出现),投入产出比低——彻底删除(Provider/布局/drawable/info/manifest/channel/桥),保留通知为唯一后台形态 | — | — |
+| 测试 | 新增模型/管道/通用流程 19 项沿用;协议卡修复回归 | — | - |
+
+### 涉及编号变更
+- 版本：`1.35.2+126` → `1.36.0+127`(功能 → Minor,§1.3;只升不降)。
+- 新增内部件(文件头注释 `P-01-01 内部件`)：`ReminderService`(MethodChannel 桥)、`CourseReminderBridge`(顶层常驻)、原生 `ReminderScheduler/Receiver/CountdownForegroundService`。
+- 桌面小组件相关编号不留(CourseWidgetProvider 已删,不占编号)。
+
 ## v1.35.2（2026-09-04）[Android] [Web]
 
 ### 变更清单

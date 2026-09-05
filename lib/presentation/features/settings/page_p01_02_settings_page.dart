@@ -15,6 +15,8 @@
 //   - C-23 滚动期间仅 header 子树重绘（SliverPersistentHeader 内部驱动），
 //     静止零 ticker；列表 SliverList.builder + addAutomaticKeepAlives: false（§11.3）。
 //   - 每行 const 构造；build 不创建新对象；Consumer + select 精确订阅（§11.2.2）。
+import 'dart:async';
+
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 
 import 'dart:io' show Platform;
@@ -28,10 +30,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/logging/log_export_service.dart';
+import '../../../core/reminder/reminder_service.dart';
 import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/c05_warning_card.dart';
+import '../../../core/widgets/mini_toast.dart';
 import '../../../domain/entities/app_settings.dart';
 import '../../../domain/entities/daily_quote.dart';
 import '../../providers/platform_providers.dart';
@@ -102,6 +106,85 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
     super.dispose();
   }
 
+  // ── v1.36.0（课程提醒 · 测试触发，真机验证用）────────────────
+
+  /// 10 秒后弹「下节课」到点提醒。
+  Future<void> _testAlert() async {
+    unawaited(ReminderService.ensureChannels());
+    await ReminderService.requestNotificationPermission();
+    final bool ok = await ReminderService.scheduleAlert(
+      id: 1001,
+      at: DateTime.now().add(const Duration(seconds: 10)),
+      title: '下节课 · 高等数学（测试）',
+      body: '第 3-4 节 · 09:50 开始',
+    );
+    if (!mounted) return;
+    showMiniToast(context, ok ? '已排 10 秒后到点提醒' : '排程失败，请查看日志');
+  }
+
+  /// 启动「3 分钟」自治模拟常驻通知（原生按墙钟 10s 一更，不依赖本页）。
+  Future<void> _testRing() async {
+    unawaited(ReminderService.ensureChannels());
+    await ReminderService.requestNotificationPermission();
+    final DateTime endAt = DateTime.now().add(const Duration(minutes: 3));
+    final bool ok = await ReminderService.startCountdown(
+      title: '高等数学（测试）',
+      endText: '第 3-4 节 · 11:30 结束',
+      endAtMillis: endAt.millisecondsSinceEpoch,
+      totalMinutes: 3,
+      updateIntervalMs: 10000, // 测试加速（真实为 60s/分钟）
+    );
+    if (!mounted) return;
+    showMiniToast(context, ok ? '已启动常驻通知（3 分钟）' : '启动失败，请查看日志');
+  }
+
+  Future<void> _stopRing() async {
+    final bool ok = await ReminderService.stopCountdown();
+    if (!mounted) return;
+    showMiniToast(context, ok ? '已停止常驻通知' : '停止失败，请查看日志');
+  }
+
+  /// 诊断：Receiver 是否被系统唤醒 / 到点通知是否真的弹出。
+  Future<void> _refreshDiag() async {
+    final Map<Object?, Object?>? d = await ReminderService.getDiagnostics();
+    String two(int v) => v.toString().padLeft(2, '0');
+    String fmt(Object? ms) {
+      if (ms is int && ms > 0) {
+        final DateTime t = DateTime.fromMillisecondsSinceEpoch(ms);
+        return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+      }
+      return '无';
+    }
+
+    final String receiver = fmt(d?['lastReceiverAt']);
+    final String receiverAct = (d?['lastReceiverAction'] as String?) ?? '';
+    final String fired = fmt(d?['lastFireAt']);
+    final String title = (d?['lastFireTitle'] as String?) ?? '';
+    if (!mounted) return;
+    setState(() {
+      _diagText =
+          '广播 $receiver($receiverAct) · 到点触发 $fired · $title';
+    });
+  }
+
+  /// 打开应用详情（引导自启动/后台运行等）。
+  void _openAppSettings() {
+    unawaited(ReminderService.openAppSettings());
+    showMiniToast(context, '请在应用信息页允许「自启动」');
+  }
+
+  /// 打开省电策略设置（引导设无限制）。
+  void _openBatterySettings() {
+    unawaited(ReminderService.openBatteryOptimizationSettings());
+    showMiniToast(context, '请在省电策略设为「无限制」');
+  }
+
+  /// 通知权限 + 精确闹钟（组合引导）。
+  void _openPermissionGuide() {
+    unawaited(ReminderService.requestNotificationPermission());
+    unawaited(ReminderService.openExactAlarmSettings());
+  }
+
   // ── v1.9.0（S-13/S-14）：日志导出状态 ──
   bool _exporting = false;
   String? _exportNotice; // 成功提示（对话框）
@@ -112,6 +195,12 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
 
   // ── v1.34.0（P-08）：Steam 查询 UAPI 密钥弹层显隐 ──
   bool _steamKeySheet = false;
+
+  // ── v1.36.0（课程提醒 · 测试）：到点触发诊断显示 ──
+  String _diagText = '点击刷新查看';
+
+  // ── v1.36.0（通知 · 开发者测试弹层显隐）──
+  bool _reminderTestSheet = false;
 
   /// 导出日志 + 性能摘要到公共 Download/（原生 MediaStore）。
   Future<void> _exportLogs() async {
@@ -198,9 +287,10 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
             bottom: 24 + throughInset, // 🔧 C-22 内容穿透底部安全间距
           ),
           addAutomaticKeepAlives: false,
-          itemCount: 6,
+          itemCount: 7,
           // v1.14.3：分组卡片间留 16 间距（避免挤在一起）。
           // v1.26.0:新增「内容设置」分组(每日一言 S-21,插在通用组后)。
+          // v1.36.0:新增「课程提醒·测试」分组(插在其它组前)。
           itemBuilder: (context, index) => switch (index) {
             0 => Padding(
               padding: const EdgeInsets.only(bottom: 16),
@@ -223,9 +313,13 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
             ),
             3 => Padding(
               padding: const EdgeInsets.only(bottom: 16),
+              child: _buildReminderTestGroup(context),
+            ),
+            4 => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
               child: _buildOtherGroup(context),
             ),
-            4 => const SizedBox(height: 8),
+            5 => const SizedBox(height: 8),
             _ => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: MiuixText(
@@ -278,10 +372,49 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
                 show: _steamKeySheet,
                 onDismissRequest: () => setState(() => _steamKeySheet = false),
               ),
+              // v1.36.0（通知 · 开发者测试弹层）。
+              MiuixOverlayDialog(
+                show: _reminderTestSheet,
+                title: '开发者测试',
+                onDismissRequest: () =>
+                    setState(() => _reminderTestSheet = false),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _sheetAction('10 秒后弹到点提醒', _testAlert),
+                    _sheetAction('启动常驻通知（3 分钟自治）', _testRing),
+                    _sheetAction('停止常驻通知', _stopRing),
+                    _sheetAction('🔍 刷新触发诊断', _refreshDiag),
+                  ],
+                ),
+              ),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// 测试弹层操作行（MiuixPressable sink 按压，与设置行一致语言）。
+  Widget _sheetAction(String label, VoidCallback onTap) {
+    return MiuixPressable(
+      feedbackType: MiuixPressFeedbackType.sink,
+      sinkAmount: 0.96,
+      borderRadius: BorderRadius.circular(10),
+      onPressed: () {
+        setState(() => _reminderTestSheet = false);
+        onTap();
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: MiuixText(
+          label,
+          style: MiuixTheme.of(context).textStyles.body2.copyWith(
+            color: MiuixTheme.of(context).colors.onSurface,
+          ),
+        ),
+      ),
     );
   }
 
@@ -628,6 +761,70 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
   }
 
   // ── 其他组 ──────────────────────────────────────────────
+
+  /// v1.36.0「通知」组：总开关 + 开启后保活引导（三步可跳转）+ 开发者测试（弹层）。
+  Widget _buildReminderTestGroup(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final MiuixTextStyles ts = MiuixTheme.of(context).textStyles;
+    final bool enabled = ref.watch(
+      appSettingsProvider.select((s) => s.courseReminderEnabled),
+    );
+    return C03GroupCard(
+      children: <Widget>[
+        MiuixSwitchPreference(
+          key: const ValueKey('switch.courseReminder'),
+          title: '课程到点提醒',
+          summary: enabled ? '到点提醒 + 上课中常驻剩余时间' : '已关闭',
+          value: enabled,
+          onChanged: (bool v) => ref
+              .read(appSettingsProvider.notifier)
+              .setCourseReminderEnabled(v),
+          insideMargin: _itemMargin,
+        ),
+        if (enabled) ...[
+          const C03IndentDivider(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: MiuixText(
+              '开启后请完成以下保活设置：杀后台后到点提醒更可靠（教程：被清后如需恢复请重新打开一次 App）',
+              style: ts.footnote1.copyWith(height: 1.4),
+              color: colors.onSurfaceVariantSummary,
+            ),
+          ),
+          MiuixArrowPreference(
+            title: '允许自启动 / 后台运行',
+            summary: 'MIUI 应用管理 → 自启动：允许',
+            insideMargin: _itemMargin,
+            onClick: _openAppSettings,
+          ),
+          const C03IndentDivider(),
+          MiuixArrowPreference(
+            title: '省电策略设为无限制',
+            summary: '电池优化豁免（后台可靠的关键）',
+            insideMargin: _itemMargin,
+            onClick: _openBatterySettings,
+          ),
+          const C03IndentDivider(),
+          MiuixArrowPreference(
+            title: '通知权限 / 精确闹钟',
+            summary: 'Android 13+ 通知 · 12+/14 精确闹钟',
+            insideMargin: _itemMargin,
+            onClick: _openPermissionGuide,
+          ),
+          const C03IndentDivider(),
+          MiuixArrowPreference(
+            title: '开发者测试 / 诊断',
+            summary: _diagText,
+            insideMargin: _itemMargin,
+            onClick: () {
+              setState(() => _reminderTestSheet = true);
+              unawaited(_refreshDiag());
+            },
+          ),
+        ],
+      ],
+    );
+  }
 
   Widget _buildOtherGroup(BuildContext context) {
     // v1.34.0:Steam 查询密钥状态(加密存储;loading 视为未配置)。

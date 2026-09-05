@@ -11,8 +11,9 @@ abstract final class AppConstants {
 
   /// 应用版本（与 pubspec version 同步，S-04 平台信息服务读取）。
   /// v1.34.0:同步为当前发布版本(此前长期滞留 1.17.4,关于页/日志失真)。
-  static const String appVersion = '1.35.2';
-  static const String buildNumber = '126';
+  /// v1.39.0:buildNumber 改为与 pubspec +N 同步(此前滞留致关于页版本失真)。
+  static const String appVersion = '1.40.0';
+  static const String buildNumber = '133';
 
   /// UAPI 接口平台 base（v1.35.0：通用工具 apiPath 统一前缀）。
   static const String uapiBaseUrl = 'https://uapis.cn';
@@ -35,10 +36,15 @@ abstract final class AppConstants {
     Color(0xFF5C6B7A), // 石板灰
   ];
 
+  /// 开源信息（v1.39.0：example 占位更正为真实开源仓库 WJKLL/Toki；
+  /// 开源版为裁剪版，不含签名/密钥，随正式版同步发布）。
   static const String license = 'Apache License 2.0';
-  static const String projectUrl = 'https://github.com/example/xiangjugong';
+  static const String licenseUrl =
+      'https://github.com/WJKLL/Toki/blob/main/LICENSE';
+  static const String projectUrl = 'https://github.com/WJKLL/Toki';
   static const String changelogUrl =
-      'https://github.com/example/xiangjugong/releases';
+      'https://github.com/WJKLL/Toki/releases';
+  static const String homeUrl = 'https://toki.omjl.top';
 
   /// 长列表滚动缓存区（§11.3：cacheExtent 默认 250px，禁止过大）。
   static const double listCacheExtent = 250;

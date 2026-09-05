@@ -108,11 +108,11 @@ class _Semaphore {
   }
 }
 
-/// 通用工具调用服务（v1.35.0）。
+/// 通用工具调用服务（v1.35.0；v1.38.1 网络错误自动重试一次 + 超时 15s）。
 class ToolApiService {
   ToolApiService({
     http.Client? client,
-    this.timeout = const Duration(seconds: 10),
+    this.timeout = const Duration(seconds: 15),
     int maxConcurrent = 3,
   }) : _client = client ?? http.Client(),
        _sem = _Semaphore(maxConcurrent);
@@ -177,6 +177,27 @@ class ToolApiService {
     Map<String, String> values,
     String? apiKey,
   ) async {
+    // v1.38.1:网络层抖动(超时/连接失败)自动重试 1 次 —— UAPI 个别接口
+    // (如 MC 曾用名)依赖上游国际服务,偶发慢/断,重试可自愈;4xx/5xx 不重试。
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _request(tool, values, apiKey);
+      } on TimeoutException {
+        if (attempt == 0) continue;
+        throw const ToolApiException(ToolApiError.network);
+      } on http.ClientException {
+        if (attempt == 0) continue;
+        throw const ToolApiException(ToolApiError.network);
+      }
+    }
+    throw const ToolApiException(ToolApiError.network); // 不可达。
+  }
+
+  Future<ToolApiResult> _request(
+    ToolConfig tool,
+    Map<String, String> values,
+    String? apiKey,
+  ) async {
     final bool get = tool.method != 'POST';
     final Map<String, String> query = <String, String>{};
     final Map<String, String> body = <String, String>{};
@@ -193,25 +214,19 @@ class ToolApiService {
     ).replace(queryParameters: query.isEmpty ? null : query);
 
     final http.Response resp;
-    try {
-      if (get) {
-        resp = await _client.get(uri, headers: _headers).timeout(timeout);
-      } else {
-        resp = await _client
-            .post(
-              uri,
-              headers: <String, String>{
-                ..._headers,
-                'Content-Type': 'application/json',
-              },
-              body: body.isEmpty ? '{}' : jsonEncode(body),
-            )
-            .timeout(timeout);
-      }
-    } on TimeoutException {
-      throw const ToolApiException(ToolApiError.network);
-    } on http.ClientException {
-      throw const ToolApiException(ToolApiError.network);
+    if (get) {
+      resp = await _client.get(uri, headers: _headers).timeout(timeout);
+    } else {
+      resp = await _client
+          .post(
+            uri,
+            headers: <String, String>{
+              ..._headers,
+              'Content-Type': 'application/json',
+            },
+            body: body.isEmpty ? '{}' : jsonEncode(body),
+          )
+          .timeout(timeout);
     }
 
     if (resp.statusCode < 200 || resp.statusCode >= 300) {

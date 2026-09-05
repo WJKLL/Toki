@@ -57,3 +57,9 @@ android/.gradle/
 
 # Release 安装包(大二进制不入库,走 GitHub Release 附件)
 /release/
+
+
+# 开发辅助(会话/IDE 配置,不开源)
+/.agents/
+/.claude/
+

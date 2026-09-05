@@ -39,6 +39,142 @@
               { "key": "max_players", "label": "上限" }
             ]
           }
+        },
+        {
+          "id": "epic_free",
+          "name": "Epic 免费游戏",
+          "summary": "本周 Epic 免费领游戏",
+          "icon": "store",
+          "apiPath": "/api/v1/game/epic-free",
+          "method": "GET",
+          "costCredits": 1,
+          "displayType": "list",
+          "result": {
+            "listPath": "data",
+            "itemTitle": "title",
+            "itemSubtitle": "free_end",
+            "itemUrl": "link"
+          }
+        },
+        {
+          "id": "mc_version",
+          "name": "MC 版本",
+          "summary": "Minecraft 最新版本号",
+          "icon": "play",
+          "apiPath": "/api/v1/game/minecraft/version",
+          "method": "GET",
+          "costCredits": 1,
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "release", "label": "正式版" },
+              { "key": "snapshot", "label": "快照版" },
+              { "key": "release_time", "label": "正式版发布" },
+              { "key": "snapshot_time", "label": "快照发布" }
+            ]
+          }
+        },
+        {
+          "id": "mc_userinfo",
+          "name": "MC 玩家",
+          "summary": "查询玩家 UUID 与皮肤",
+          "icon": "community",
+          "apiPath": "/api/v1/game/minecraft/userinfo",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "username", "label": "玩家名", "type": "text", "placeholder": "如 Notch", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "username", "label": "玩家名" },
+              { "key": "uuid", "label": "UUID" }
+            ]
+          }
+        },
+        {
+          "id": "mc_bedrock",
+          "name": "MC 基岩版服务器",
+          "summary": "基岩版服务器在线状态",
+          "icon": "link",
+          "apiPath": "/api/v1/game/minecraft/bedrockstatus",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "server", "label": "服务器地址", "type": "text", "placeholder": "如 geo.hivebedrock.network", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "online", "label": "在线" },
+              { "key": "motd_clean", "label": "MOTD" },
+              { "key": "ip", "label": "地址" },
+              { "key": "port", "label": "端口" },
+              { "key": "edition", "label": "版本" },
+              { "key": "players", "label": "当前玩家" },
+              { "key": "max_players", "label": "上限" },
+              { "key": "gamemode", "label": "模式" },
+              { "key": "latency_ms", "label": "延迟(ms)" }
+            ]
+          }
+        },
+        {
+          "id": "mc_historyid",
+          "name": "MC 曾用名",
+          "summary": "查询玩家历史改名记录",
+          "icon": "community",
+          "apiPath": "/api/v1/game/minecraft/historyid",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "name", "label": "玩家名", "type": "text", "placeholder": "如 Notch", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "results.0.history",
+            "itemTitle": "name",
+            "itemSubtitle": "changedToAt"
+          }
+        },
+        {
+          "id": "steam_servers",
+          "name": "Steam 游戏服务器",
+          "summary": "查询游戏社区服务器",
+          "icon": "play",
+          "apiPath": "/api/v1/game/steam/servers",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "appid", "label": "游戏 AppID", "type": "number", "placeholder": "730 = CS2", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "servers",
+            "itemTitle": "name",
+            "itemSubtitle": "map"
+          }
+        },
+        {
+          "id": "mc_mods",
+          "name": "MC Mod 搜索",
+          "summary": "搜索 Mod / 插件（带图标）",
+          "icon": "store",
+          "apiPath": "/api/v1/game/minecraft/mods",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "query", "label": "关键词", "type": "text", "placeholder": "如 jei", "in": "query" },
+            { "name": "source", "label": "来源", "type": "select", "options": ["all", "modrinth", "spigotmc"], "defaultValue": "all", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "results",
+            "itemTitle": "name",
+            "itemSubtitle": "description",
+            "itemUrl": "page_url",
+            "coverField": "icon_url"
+          }
         }
       ]
     },
@@ -67,6 +203,20 @@
           "costCredits": 1,
           "params": [
             { "name": "text", "label": "内容", "type": "text", "placeholder": "要编码的文本 / 链接", "in": "query" }
+          ],
+          "displayType": "image",
+          "result": { "source": "body" }
+        },
+        {
+          "id": "gravatar",
+          "name": "Gravatar 头像",
+          "summary": "邮箱获取全球通用头像",
+          "icon": "community",
+          "apiPath": "/api/v1/avatar/gravatar",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "email", "label": "邮箱", "type": "text", "placeholder": "you@example.com", "in": "query" }
           ],
           "displayType": "image",
           "result": { "source": "body" }
@@ -116,6 +266,100 @@
               { "key": "isp", "label": "运营商" },
               { "key": "asn", "label": "ASN" },
               { "key": "llc", "label": "简称" }
+            ]
+          }
+        },
+        {
+          "id": "icp_lookup",
+          "name": "ICP 备案查询",
+          "summary": "查询域名备案主体与备案号",
+          "icon": "link",
+          "apiPath": "/api/v1/network/icp",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "domain", "label": "域名", "type": "text", "placeholder": "如 baidu.com", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "unitName", "label": "主办单位" },
+              { "key": "natureName", "label": "单位性质" },
+              { "key": "serviceLicence", "label": "备案号" }
+            ]
+          }
+        },
+        {
+          "id": "dns_lookup",
+          "name": "DNS 解析",
+          "summary": "查询域名解析记录",
+          "icon": "link",
+          "apiPath": "/api/v1/network/dns",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "domain", "label": "域名", "type": "text", "placeholder": "如 example.com", "in": "query" },
+            { "name": "type", "label": "记录类型", "type": "select", "options": ["A", "AAAA", "CNAME", "MX", "NS", "TXT"], "defaultValue": "A", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "records",
+            "itemTitle": "target"
+          }
+        },
+        {
+          "id": "whois_lookup",
+          "name": "WHOIS 查询",
+          "summary": "域名注册信息全文",
+          "icon": "notes",
+          "apiPath": "/api/v1/network/whois",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "domain", "label": "域名", "type": "text", "placeholder": "如 example.com", "in": "query" }
+          ],
+          "displayType": "text",
+          "result": { "field": "whois" }
+        },
+        {
+          "id": "url_status",
+          "name": "URL 状态检测",
+          "summary": "检查网址是否可访问",
+          "icon": "link",
+          "apiPath": "/api/v1/network/urlstatus",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "url", "label": "网址", "type": "text", "placeholder": "https://…", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "url", "label": "地址" },
+              { "key": "status", "label": "状态码" }
+            ]
+          }
+        },
+        {
+          "id": "ping_host",
+          "name": "Ping 测试",
+          "summary": "测试主机连通与延迟",
+          "icon": "link",
+          "apiPath": "/api/v1/network/ping",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "host", "label": "主机", "type": "text", "placeholder": "如 baidu.com", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "host", "label": "主机" },
+              { "key": "ip", "label": "IP" },
+              { "key": "location", "label": "地区" },
+              { "key": "min", "label": "最小(ms)" },
+              { "key": "avg", "label": "平均(ms)" },
+              { "key": "max", "label": "最大(ms)" }
             ]
           }
         }
@@ -252,6 +496,99 @@
           ],
           "displayType": "text",
           "result": { "field": "plaintext" }
+        },
+        {
+          "id": "md5_verify",
+          "name": "MD5 校验",
+          "summary": "验证文本与 MD5 是否一致",
+          "icon": "notes",
+          "apiPath": "/api/v1/text/md5/verify",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "hash", "label": "MD5 值", "type": "text", "placeholder": "5d41402abc4b2a76…", "in": "body" },
+            { "name": "text", "label": "原文", "type": "text", "placeholder": "要校验的文本", "in": "body" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "match", "label": "是否匹配" }
+            ]
+          }
+        },
+        {
+          "id": "profanitycheck",
+          "name": "敏感词检测",
+          "summary": "检测文本敏感词并打码",
+          "icon": "notes",
+          "apiPath": "/api/v1/text/profanitycheck",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "text", "label": "原文", "type": "text", "placeholder": "要检测的文本", "in": "body" }
+          ],
+          "displayType": "text",
+          "result": { "field": "masked_text" }
+        },
+        {
+          "id": "text_analyze",
+          "name": "文本分析",
+          "summary": "字数 / 汉字 / 字母统计",
+          "icon": "notes",
+          "apiPath": "/api/v1/text/analyze",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "text", "label": "原文", "type": "text", "placeholder": "要统计的文本", "in": "body" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "total_chars_unicode", "label": "字符数" },
+              { "key": "chinese_chars", "label": "汉字" },
+              { "key": "english_letters", "label": "字母" },
+              { "key": "numbers", "label": "数字" },
+              { "key": "punctuation_marks", "label": "标点" },
+              { "key": "whitespace_chars", "label": "空格" },
+              { "key": "total_bytes", "label": "字节" }
+            ]
+          }
+        },
+        {
+          "id": "aes_encrypt_adv",
+          "name": "AES 高级加密",
+          "summary": "指定模式 / 填充的 AES",
+          "icon": "notes",
+          "apiPath": "/api/v1/text/aes/encrypt-advanced",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "key", "label": "密钥", "type": "text", "placeholder": "按模式长度要求", "in": "body" },
+            { "name": "text", "label": "原文", "type": "text", "placeholder": "要加密的消息", "in": "body" },
+            { "name": "mode", "label": "模式", "type": "select", "options": ["ECB", "CBC", "GCM", "CTR", "OFB", "CFB"], "defaultValue": "ECB", "in": "body" },
+            { "name": "padding", "label": "填充", "type": "select", "options": ["PKCS7", "ZERO", "NONE"], "defaultValue": "PKCS7", "in": "body" },
+            { "name": "iv", "label": "IV（CBC/GCM 需要）", "type": "text", "placeholder": "可选，16 字节", "in": "body" }
+          ],
+          "displayType": "text",
+          "result": { "field": "ciphertext" }
+        },
+        {
+          "id": "aes_decrypt_adv",
+          "name": "AES 高级解密",
+          "summary": "指定模式 / 填充还原明文",
+          "icon": "notes",
+          "apiPath": "/api/v1/text/aes/decrypt-advanced",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "key", "label": "密钥", "type": "text", "placeholder": "与加密一致", "in": "body" },
+            { "name": "text", "label": "密文", "type": "text", "placeholder": "粘贴 ciphertext", "in": "body" },
+            { "name": "mode", "label": "模式", "type": "select", "options": ["ECB", "CBC", "GCM", "CTR", "OFB", "CFB"], "defaultValue": "ECB", "in": "body" },
+            { "name": "padding", "label": "填充", "type": "select", "options": ["PKCS7", "ZERO", "NONE"], "defaultValue": "PKCS7", "in": "body" },
+            { "name": "iv", "label": "IV（CBC/GCM 需要）", "type": "text", "placeholder": "可选，16 字节", "in": "body" }
+          ],
+          "displayType": "text",
+          "result": { "field": "plaintext" }
         }
       ]
     },
@@ -319,6 +656,22 @@
           ],
           "displayType": "text",
           "result": { "field": "translate" }
+        },
+        {
+          "id": "ai_translate",
+          "name": "AI 翻译",
+          "summary": "语境感知的高质量翻译",
+          "icon": "translate",
+          "apiPath": "/api/v1/ai/translate",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "text", "label": "原文", "type": "text", "placeholder": "要翻译的文本", "in": "body" },
+            { "name": "style", "label": "风格", "type": "select", "options": ["casual", "professional", "academic", "literary"], "defaultValue": "casual", "in": "body" },
+            { "name": "target_lang", "label": "目标语言", "type": "text", "defaultValue": "zh", "placeholder": "zh / en / ja…", "in": "query" }
+          ],
+          "displayType": "text",
+          "result": { "field": "data.translated_text" }
         }
       ]
     },
@@ -352,6 +705,36 @@
           "costCredits": 1,
           "displayType": "image",
           "result": { "source": "body" }
+        }
+      ]
+    },
+    {
+      "id": "dictionary",
+      "name": "词典",
+      "icon": "notes",
+      "tools": [
+        {
+          "id": "dict_lookup",
+          "name": "单词词典",
+          "summary": "音标 + 释义查询",
+          "icon": "notes",
+          "apiPath": "/api/v1/dictionary/lookup",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "word", "label": "单词", "type": "text", "placeholder": "如 world", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "entry.word", "label": "单词" },
+              { "key": "entry.phonetics.uk.text", "label": "英式音标" },
+              { "key": "entry.phonetics.us.text", "label": "美式音标" },
+              { "key": "entry.definitions.0.meaning", "label": "释义 1" },
+              { "key": "entry.definitions.1.meaning", "label": "释义 2" },
+              { "key": "entry.definitions.2.meaning", "label": "释义 3" }
+            ]
+          }
         }
       ]
     },
@@ -410,6 +793,147 @@
               { "key": "sign", "label": "签名" }
             ]
           }
+        },
+        {
+          "id": "github_user",
+          "name": "GitHub 用户",
+          "summary": "开发者账号公开数据",
+          "icon": "community",
+          "apiPath": "/api/v1/github/user",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "user", "label": "用户名", "type": "text", "placeholder": "如 octocat", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "imageField": "avatar_url",
+            "fields": [
+              { "key": "name", "label": "名字" },
+              { "key": "login", "label": "账号" },
+              { "key": "bio", "label": "简介" },
+              { "key": "company", "label": "公司" },
+              { "key": "location", "label": "地区" },
+              { "key": "followers", "label": "粉丝" },
+              { "key": "following", "label": "关注" },
+              { "key": "public_repos", "label": "公开仓库" }
+            ]
+          }
+        },
+        {
+          "id": "github_repo",
+          "name": "GitHub 仓库",
+          "summary": "仓库星标 / 语言 / 许可证",
+          "icon": "file",
+          "apiPath": "/api/v1/github/repo",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "repo", "label": "仓库", "type": "text", "placeholder": "如 octocat/Hello-World", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "full_name", "label": "仓库" },
+              { "key": "description", "label": "描述" },
+              { "key": "language", "label": "语言" },
+              { "key": "license", "label": "许可证" },
+              { "key": "stargazers", "label": "星标" },
+              { "key": "forks", "label": "复刻" },
+              { "key": "watchers", "label": "关注" },
+              { "key": "default_branch", "label": "默认分支" },
+              { "key": "pushed_at", "label": "最近推送" }
+            ]
+          }
+        },
+        {
+          "id": "qq_user",
+          "name": "QQ 信息",
+          "summary": "QQ 号公开资料",
+          "icon": "community",
+          "apiPath": "/api/v1/social/qq/userinfo",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "qq", "label": "QQ 号", "type": "text", "placeholder": "如 10001", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "nick", "label": "昵称" },
+              { "key": "long_nick", "label": "签名" },
+              { "key": "age", "label": "年龄" },
+              { "key": "location", "label": "地区" },
+              { "key": "email", "label": "邮箱" },
+              { "key": "qq_level", "label": "QQ 等级" }
+            ]
+          }
+        },
+        {
+          "id": "bili_video",
+          "name": "B站视频",
+          "summary": "视频播放 / 点赞数据",
+          "icon": "play",
+          "apiPath": "/api/v1/social/bilibili/videoinfo",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "bvid", "label": "视频 BV 号", "type": "text", "placeholder": "如 BV1GJ411x7h7", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "imageField": "pic",
+            "fields": [
+              { "key": "title", "label": "标题" },
+              { "key": "owner.name", "label": "UP 主" },
+              { "key": "stat.view", "label": "播放" },
+              { "key": "stat.like", "label": "点赞" },
+              { "key": "stat.coin", "label": "投币" },
+              { "key": "stat.favorite", "label": "收藏" },
+              { "key": "stat.share", "label": "分享" },
+              { "key": "stat.danmaku", "label": "弹幕" }
+            ]
+          }
+        },
+        {
+          "id": "bili_live",
+          "name": "B站直播间",
+          "summary": "直播间状态与人气",
+          "icon": "play",
+          "apiPath": "/api/v1/social/bilibili/liveroom",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "room_id", "label": "房间号 / 短号", "type": "text", "placeholder": "如 6", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "title", "label": "标题" },
+              { "key": "live_status", "label": "状态", "map": { "0": "未开播", "1": "直播中", "2": "轮播中" } },
+              { "key": "area_name", "label": "分区" },
+              { "key": "online", "label": "人气" },
+              { "key": "attention", "label": "关注" },
+              { "key": "uid", "label": "主播 UID" }
+            ]
+          }
+        },
+        {
+          "id": "bili_archives",
+          "name": "B站投稿",
+          "summary": "UP 主最新投稿列表",
+          "icon": "play",
+          "apiPath": "/api/v1/social/bilibili/archives",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "mid", "label": "UP 主 UID", "type": "text", "placeholder": "如 483307278", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "videos",
+            "itemTitle": "title"
+          }
         }
       ]
     },
@@ -452,6 +976,158 @@
           "result": {
             "listPath": "items",
             "itemTitle": "title"
+          }
+        },
+        {
+          "id": "phone_info",
+          "name": "手机号归属地",
+          "summary": "号码归属地与运营商",
+          "icon": "location",
+          "apiPath": "/api/v1/misc/phoneinfo",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "phone", "label": "手机号", "type": "text", "placeholder": "如 13800138000", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "province", "label": "省份" },
+              { "key": "city", "label": "城市" },
+              { "key": "sp", "label": "运营商" }
+            ]
+          }
+        },
+        {
+          "id": "express_detect",
+          "name": "快递公司识别",
+          "summary": "快递单号识别快递公司",
+          "icon": "store",
+          "apiPath": "/api/v1/misc/tracking/detect",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "tracking_number", "label": "快递单号", "type": "text", "placeholder": "如 SF1092298663387", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "carrier_name", "label": "快递公司" }
+            ]
+          }
+        },
+        {
+          "id": "box_office",
+          "name": "电影票房榜",
+          "summary": "实时电影票房排行",
+          "icon": "topDownloads",
+          "apiPath": "/api/v1/misc/movie-box-office",
+          "method": "GET",
+          "costCredits": 1,
+          "displayType": "list",
+          "result": {
+            "listPath": "list",
+            "itemTitle": "movie_name",
+            "itemSubtitle": "box_office",
+            "itemUrl": "detail_url"
+          }
+        },
+        {
+          "id": "date_diff",
+          "name": "日期差计算",
+          "summary": "两个日期相差多久",
+          "icon": "timer",
+          "apiPath": "/api/v1/misc/date-diff",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "start_date", "label": "开始日期", "type": "text", "placeholder": "2024-01-01", "in": "body" },
+            { "name": "end_date", "label": "结束日期", "type": "text", "placeholder": "2024-03-15", "in": "body" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "human_readable", "label": "自然描述" },
+              { "key": "days", "label": "天数" },
+              { "key": "weeks", "label": "周数" },
+              { "key": "hours", "label": "小时" }
+            ]
+          }
+        },
+        {
+          "id": "random_number",
+          "name": "随机数生成",
+          "summary": "生成指定范围随机数字",
+          "icon": "refresh",
+          "apiPath": "/api/v1/misc/randomnumber",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "min", "label": "最小值", "type": "number", "defaultValue": "1", "in": "query" },
+            { "name": "max", "label": "最大值", "type": "number", "defaultValue": "100", "in": "query" },
+            { "name": "count", "label": "生成个数", "type": "number", "defaultValue": "3", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "numbers"
+          }
+        },
+        {
+          "id": "prog_today",
+          "name": "程序员今天",
+          "summary": "历史上的今天 · 程序员向",
+          "icon": "months",
+          "apiPath": "/api/v1/history/programmer/today",
+          "method": "GET",
+          "costCredits": 1,
+          "displayType": "list",
+          "result": {
+            "listPath": "events",
+            "itemTitle": "title",
+            "itemSubtitle": "category"
+          }
+        },
+        {
+          "id": "prog_history",
+          "name": "程序员历史",
+          "summary": "查询某日编程大事记",
+          "icon": "months",
+          "apiPath": "/api/v1/history/programmer",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "month", "label": "月份", "type": "number", "placeholder": "1-12", "in": "query" },
+            { "name": "day", "label": "日期", "type": "number", "placeholder": "1-31", "in": "query" }
+          ],
+          "displayType": "list",
+          "result": {
+            "listPath": "events",
+            "itemTitle": "title",
+            "itemSubtitle": "category"
+          }
+        },
+        {
+          "id": "weather",
+          "name": "天气",
+          "summary": "实时天气与温湿度",
+          "icon": "months",
+          "apiPath": "/api/v1/misc/weather",
+          "method": "GET",
+          "costCredits": 1,
+          "params": [
+            { "name": "city", "label": "城市", "type": "text", "placeholder": "如 北京 / 上海", "in": "query" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "city", "label": "城市" },
+              { "key": "weather", "label": "天气" },
+              { "key": "temperature", "label": "气温(°C)" },
+              { "key": "wind_direction", "label": "风向" },
+              { "key": "wind_power", "label": "风力" },
+              { "key": "humidity", "label": "湿度(%)" },
+              { "key": "report_time", "label": "更新时间" }
+            ]
           }
         }
       ]
@@ -499,6 +1175,20 @@
           ],
           "displayType": "text",
           "result": { "field": "content" }
+        },
+        {
+          "id": "markdown_html",
+          "name": "Markdown 转 HTML",
+          "summary": "生成带样式的 HTML 代码",
+          "icon": "file",
+          "apiPath": "/api/v1/text/markdown-to-html",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "text", "label": "Markdown", "type": "text", "placeholder": "# 标题…", "in": "body" }
+          ],
+          "displayType": "text",
+          "result": { "field": "data.html" }
         }
       ]
     },

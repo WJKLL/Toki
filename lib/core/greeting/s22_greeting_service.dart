@@ -124,9 +124,10 @@ class GreetingService {
     (from: 23, to: 4, lines: <String>['夜深了，早点休息', '熬夜伤身，晚安', '夜深人静，愿你安眠']),
   ];
 
-  /// 生成问候语：`「文案，{userName}」`（userName 默认 'XX'）。
+  /// 生成问候语：传 [userName] 时拼「文案，名字」；缺省仅返回文案本体
+  /// （v1.38.1：移除 'XX' 占位尾缀——未设置用户名不拼名字）。
   /// 优先级：节日 > 节气（±1 天） > 时段。
-  String greetingFor({String userName = 'XX'}) {
+  String greetingFor({String userName = ''}) {
     final DateTime now = _clock();
     // 确定性 seed:同一小时结果稳定(避免摘要卡重建时文案闪变)。
     final math.Random rng =
@@ -136,8 +137,9 @@ class GreetingService {
         _festivalText(doy, rng) ??
         _solarTermText(doy) ??
         _periodText(now.hour, rng);
-    if (text == null) return '你好，$userName'; // 理论不可达兜底
-    return '$text，$userName';
+    final String? tail = userName.isEmpty ? null : userName;
+    if (text == null) return tail == null ? '你好' : '你好，$tail';
+    return tail == null ? text : '$text，$tail';
   }
 
   /// 节日命中（精确日）→ 池内随机一条。

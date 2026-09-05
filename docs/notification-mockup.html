@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toki 课程通知样式 · 审核</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:#0d0d0d; color:#fff; padding:32px 16px; }
+  h1 { font-size:20px; text-align:center; margin-bottom:4px; }
+  .sub { font-size:12px; color:#888; text-align:center; margin-bottom:28px; }
+  .row { display:flex; flex-wrap:wrap; gap:28px; justify-content:center; }
+  .phone { width:320px; border-radius:34px; padding:12px; background:#1c1c1e; box-shadow:0 12px 40px rgba(0,0,0,.6); }
+  .phone.light { background:#f2f2f7; }
+  .screen { border-radius:24px; padding:14px 10px 20px; min-height:340px; }
+  .dark .screen { background:#121214; }
+  .light .screen { background:#f7f7fa; }
+  .cap { text-align:center; font-size:11px; color:#888; margin:14px 0 8px; }
+
+  .notif { border-radius:16px; padding:12px 14px; margin-bottom:12px; box-shadow:0 2px 10px rgba(0,0,0,.35); }
+  .dark .notif { background:#232326; border:1px solid rgba(255,255,255,.06); }
+  .light .notif { background:#fff; border:1px solid rgba(0,0,0,.04); }
+  .head { display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:8px; }
+  .dark .head { color:#9e9e9e; }
+  .light .head { color:#8a8a92; }
+  .appicon { width:16px; height:16px; border-radius:5px; background:#3482FF; color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .time { margin-left:auto; }
+  .body { display:flex; gap:12px; align-items:center; }
+  .title { font-size:15px; font-weight:600; }
+  .dark .title { color:#fff; }
+  .light .title { color:#111; }
+  .meta { font-size:12px; margin-top:3px; }
+  .dark .meta { color:#9e9e9e; }
+  .light .meta { color:#8a8a92; }
+  .pct { font-size:15px; font-weight:700; color:#3482FF; }
+  .actions { display:flex; gap:8px; margin-top:10px; }
+  .btn { font-size:12px; padding:6px 14px; border-radius:999px; background:#3482FF; color:#fff; font-weight:500; }
+  .btn.ghost { background:transparent; }
+  .dark .btn.ghost { color:#bdbdc4; border:1px solid #3a3a3e; }
+  .light .btn.ghost { color:#555; border:1px solid #ddd; }
+  .tag { font-size:10px; padding:2px 8px; border-radius:6px; background:rgba(52,130,255,.15); color:#3482FF; margin-left:auto; }
+
+  /* 圆环 SVG */
+  .ring { width:54px; height:54px; flex:none; }
+  /* 圆环:HTML 绝对居中叠层(不依赖 SVG 文本基线) */
+  .ringwrap { position:relative; width:54px; height:54px; flex:none; }
+  .ringwrap svg { width:100%; height:100%; display:block; }
+  .ringpct { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#3482FF; }
+</style>
+</head>
+<body>
+  <h1>Toki · 课程通知样式</h1>
+  <div class="sub">两形态：到点弹出通知（上课开始时）→ 常驻圆环通知（上课期间持续刷新，下课消失）</div>
+
+  <div class="row">
+    <!-- 深色 -->
+    <div class="phone dark">
+      <div class="screen">
+        <div class="cap">🌙 深色模式</div>
+
+        <!-- ① 到点弹出通知 -->
+        <div class="notif">
+          <div class="head">
+            <div class="appicon">T</div><span>Toki</span><span class="time">刚刚</span>
+          </div>
+          <div class="body">
+            <div style="flex:1">
+              <div class="title">下节课 · 高等数学</div>
+              <div class="meta">第 3-4 节 · 09:50 开始</div>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="btn">查看课表</span><span class="btn ghost">知道了</span>
+          </div>
+        </div>
+
+        <!-- ② 常驻圆环通知 -->
+        <div class="notif">
+          <div class="head">
+            <div class="appicon">T</div><span>Toki</span><span class="tag">课程进行中</span>
+          </div>
+          <div class="body">
+            <div class="ringwrap">
+              <svg viewBox="0 0 54 54">
+                <circle cx="27" cy="27" r="22" stroke="#3a3a3e" stroke-width="6" fill="none"/>
+                <circle cx="27" cy="27" r="22" stroke="#3482FF" stroke-width="6" fill="none"
+                  stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="94"
+                  transform="rotate(-90 27 27)"/>
+              </svg>
+              <span class="ringpct">32%</span>
+            </div>
+            <div style="flex:1">
+              <div class="title">高等数学</div>
+              <div class="meta">剩余 <span class="pct">28 分钟</span></div>
+              <div class="meta">第 3-4 节 · 11:30 结束</div>
+            </div>
+          </div>
+          <div class="actions"><span class="btn">进入课表</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 浅色 -->
+    <div class="phone light">
+      <div class="screen">
+        <div class="cap">☀️ 浅色模式</div>
+
+        <div class="notif">
+          <div class="head">
+            <div class="appicon">T</div><span>Toki</span><span class="time">刚刚</span>
+          </div>
+          <div class="body">
+            <div style="flex:1">
+              <div class="title">下节课 · 高等数学</div>
+              <div class="meta">第 3-4 节 · 09:50 开始</div>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="btn">查看课表</span><span class="btn ghost">知道了</span>
+          </div>
+        </div>
+
+        <div class="notif">
+          <div class="head">
+            <div class="appicon">T</div><span>Toki</span><span class="tag">课程进行中</span>
+          </div>
+          <div class="body">
+            <div class="ringwrap">
+              <svg viewBox="0 0 54 54">
+                <circle cx="27" cy="27" r="22" stroke="#e5e5ea" stroke-width="6" fill="none"/>
+                <circle cx="27" cy="27" r="22" stroke="#3482FF" stroke-width="6" fill="none"
+                  stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="94"
+                  transform="rotate(-90 27 27)"/>
+              </svg>
+              <span class="ringpct">32%</span>
+            </div>
+            <div style="flex:1">
+              <div class="title">高等数学</div>
+              <div class="meta">剩余 <span class="pct">28 分钟</span></div>
+              <div class="meta">第 3-4 节 · 11:30 结束</div>
+            </div>
+          </div>
+          <div class="actions"><span class="btn">进入课表</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sub" style="margin-top:24px">
+    圆环 = 课程剩余比例（随分钟刷新）；到点通知上课时弹出 → 转为常驻圆环通知，下课自动消失。
+  </div>
+</body>
+</html>

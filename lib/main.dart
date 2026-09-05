@@ -35,6 +35,7 @@ import 'presentation/providers/daily_activity_provider.dart';
 import 'presentation/providers/scroll_activity_provider.dart';
 import 'presentation/providers/settings_providers.dart';
 import 'presentation/router/app_router.dart';
+import 'presentation/widgets/course_reminder_bridge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -213,7 +214,11 @@ class XiangJuGongApp extends ConsumerWidget {
                       data: MediaQuery.of(context).copyWith(
                         textScaler: TextScaler.noScaling, // ⚡ 功耗优化：恒定 1.0，无逐帧换算
                       ),
-                      child: child ?? const SizedBox.shrink(),
+                      // v1.36.0：课程提醒常驻桥（课表→到点闹钟 / 上课→常驻通知；
+                      //   Android 生效，Web 空转透传）。
+                      child: CourseReminderBridge(
+                        child: child ?? const SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 );

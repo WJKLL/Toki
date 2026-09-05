@@ -11,11 +11,13 @@ import 'package:flutter/material.dart' show Material, MaterialType;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
+import '../../../core/widgets/mini_toast.dart';
 import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
@@ -112,15 +114,29 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
           ),
           addAutomaticKeepAlives: false,
           children: <Widget>[
-            // ── 应用标识 ──
+            // ── 应用标识（v1.39.0:真实应用图标替换泛化 tasks 图标）──
             Padding(
               padding: const EdgeInsets.only(bottom: 24),
               child: Column(
                 children: [
-                  MiuixIcon(
-                    vector: appIcon('tasks'),
-                    size: 56,
-                    tint: colors.primary,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.asset(
+                      'assets/images/app_icon.png',
+                      width: 72,
+                      height: 72,
+                      // 深色/浅色底衬内不裁内容(launcher 图自带圆角背景)。
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => SizedBox(
+                        width: 72,
+                        height: 72,
+                        child: MiuixIcon(
+                          vector: appIcon('tasks'),
+                          size: 48,
+                          tint: colors.primary,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   MiuixText(
@@ -137,6 +153,7 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
                 ],
               ),
             ),
+            // v1.39.0:信息行支持跳转(仓库/许可/发布/官网,外开浏览器)。
             const C03GroupCard(
               children: [
                 _InfoRow(
@@ -147,9 +164,23 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
                 C03IndentDivider(),
                 _InfoRow(label: '开源许可', value: AppConstants.license),
                 C03IndentDivider(),
-                _InfoRow(label: '项目地址', value: AppConstants.projectUrl),
+                _InfoRow(
+                  label: 'GitHub 仓库',
+                  value: 'github.com/WJKLL/Toki',
+                  url: AppConstants.projectUrl,
+                ),
                 C03IndentDivider(),
-                _InfoRow(label: '发布记录', value: AppConstants.changelogUrl),
+                _InfoRow(
+                  label: '发布记录',
+                  value: 'GitHub Releases',
+                  url: AppConstants.changelogUrl,
+                ),
+                C03IndentDivider(),
+                _InfoRow(
+                  label: '官方网站',
+                  value: 'toki.omjl.top',
+                  url: AppConstants.homeUrl,
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -196,33 +227,56 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
   }
 }
 
-/// 关于页信息行（静态 const）。
+/// 关于页信息行（静态 const；[url] 非空 → 整行可点外开浏览器 + 行尾箭头）。
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({required this.label, required this.value, this.url});
 
   final String label;
   final String value;
+  final String? url;
+
+  Future<void> _open(BuildContext context) async {
+    final Uri? uri = Uri.tryParse(url!);
+    if (uri == null) return;
+    final bool ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) showMiniToast(context, '无法打开链接');
+  }
 
   @override
   Widget build(BuildContext context) {
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
     final MiuixColors colors = MiuixTheme.of(context).colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          MiuixText(label, style: textStyles.body1),
-          const Spacer(),
-          Flexible(
-            child: MiuixText(
-              value,
-              style: textStyles.body2,
-              color: colors.onSurfaceVariantSummary,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    final bool tappable = url != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: tappable ? () => _open(context) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            MiuixText(label, style: textStyles.body1),
+            const Spacer(),
+            Flexible(
+              child: MiuixText(
+                value,
+                style: textStyles.body2,
+                color: tappable
+                    ? colors.primary
+                    : colors.onSurfaceVariantSummary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-        ],
+            if (tappable) ...[
+              const SizedBox(width: 6),
+              MiuixIcon(
+                vector: appIcon('chevronForward'),
+                size: 15,
+                tint: colors.onSurfaceVariantSummary,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
