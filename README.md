@@ -38,9 +38,15 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 ## 🎬 演示
 
-![长按进入编辑态与 ✕ 移除演示](docs/demo/toki-demo.gif)
+**完整操作演示（2026-09 · 88 秒）** —— 新版本实机录屏：
 
-<video src="https://github.com/WJKLL/Toki/raw/main/docs/demo/VID_20260906_182410.mp4" controls width="100%"></video>
+<img src="docs/demo/toki-demo-v2.gif" width="300" alt="Toki 完整使用演示"/>
+
+> 📹 完整版（含声音）：[GitHub 页面内播放](https://github.com/WJKLL/Toki/blob/main/docs/demo/VID_20260906_182410.mp4) · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/VID_20260906_182410.mp4)
+
+首页卡片长按编辑态专项演示：
+
+![长按进入编辑态与 ✕ 移除演示](docs/demo/toki-demo.gif)
 
 ---
 
