@@ -14,13 +14,8 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/u02_color_utils.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
-import '../../providers/platform_providers.dart';
-import '../../providers/settings_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
 
@@ -66,58 +61,28 @@ class _PageP02ColorPalettePageState
     onTap: () => Navigator.of(context).maybePop(),
   );
 
-  // ── C-25（v1.12.3）：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  /// 页面级顶部快照（U-03 门控创建/释放；null = 降级纯 surface）。
-  MiuixLayerBackdrop? _topBackdrop;
-
-  /// 顶部折叠滚动行为（MiuixTopAppBar + MiuixScrollBehaviorListener 联动）。
+  // ── C-25（v1.12.3）：顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无快照采样)──
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
 
-  /// U-03 裁决创建/释放顶部快照（build 中调用，幂等）。
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    // ⚡ 功耗优化：顶部快照释放。
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    // v1.12.3（C-25）：顶部毛玻璃 U-03 裁决 + 快照幂等同步。
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
     final MiuixColors colors = MiuixTheme.of(context).colors;
 
     // v1.12.3：移除 TickerMode(false) —— MiuixTopAppBar 内部有小标题弹簧
     //   AnimationController，静音会冻结折叠动画；静止零 ticker。
     return MiuixScaffold(
       contentWindowInsets: EdgeInsets.zero,
-      // v1.12.3（C-25）：顶部毛玻璃标题栏（KernelSU TopAppBar 样式）。
+      // v1.12.3（C-25）：顶部标题栏（KernelSU TopAppBar 样式）。
       topBar: C25FrostedTopBar(
         title: '色彩调色板',
         largeTitle: '色彩调色板',
         navigationIcon: _backButton, // 左 1 按钮（返回）
-        actions: <Widget>[
+        actions: const <Widget>[
           // v1.13.0（C-26）：顶部更多菜单。
-          C26MoreMenu(backdrop: _topBackdrop),
+          C26MoreMenu(),
         ],
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         // v1.12.3：内容避让顶栏；快照画 surface 底色 + 采样 6 帧。
@@ -139,16 +104,11 @@ class _PageP02ColorPalettePageState
             );
           },
         );
+        // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget gridWithBg = ColoredBox(
           color: colors.surface,
           child: grid,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: gridWithBg),
-              )
-            : grid;
         return Material(
           type: MaterialType.transparency,
           // 🔧 v1.0.7（布局稳定性）：Column + MainAxisAlignment.start 强制顶格。
@@ -160,7 +120,7 @@ class _PageP02ColorPalettePageState
                 // v1.12.3：MiuixScrollBehaviorListener 桥接滚动折叠。
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: gridWithBg,
                 ),
               ),
             ],

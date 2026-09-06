@@ -34,12 +34,14 @@ class CourseListNotifier extends AsyncNotifier<List<Course>> {
   }
 
   /// 新增课程（自动生成唯一 id；colorValue 缺省按课程名 auto 分配）。
+  /// v1.42.0:支持具体周次 [weeks](起止周手动编辑,与导入课同语义)。
   Future<void> addCourse({
     required String name,
     required int day,
     required int start,
     int len = 1,
     WeekType week = WeekType.every,
+    List<int> weeks = const <int>[],
     int? colorValue,
     String? location,
     String? teacher,
@@ -54,6 +56,7 @@ class CourseListNotifier extends AsyncNotifier<List<Course>> {
         start: start,
         len: len,
         week: week,
+        weeks: weeks,
         colorValue: colorValue ?? Course.autoColor(name),
         location: location,
         teacher: teacher,

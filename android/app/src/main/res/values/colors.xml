@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v1.44.x 原生启动屏背景色（浅色主题；与 Flutter surface 近似，与 C-50
+         品牌层同底色，冷启动过渡无缝）。 -->
+    <color name="splash_background">#FFFFFFFF</color>
+</resources>

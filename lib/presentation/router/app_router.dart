@@ -22,6 +22,8 @@ import '../features/permissions/page_p03_permissions_page.dart';
 import '../features/settings/page_p01_02_settings_page.dart';
 import '../features/settings/page_p01_02_01_theme_config_page.dart';
 import '../features/timetable/page_p06_timetable_page.dart';
+import '../features/todo/page_p11_v2_flow_editor_page.dart';
+import '../features/todo/page_p12_archive_page.dart';
 import '../features/tools/page_p08_steam_query_page.dart';
 import '../features/tools/page_p09_tool_generic.dart';
 import '../shell/main_shell_page.dart';
@@ -34,8 +36,10 @@ import '../../core/logging/app_log_service.dart';
 ///   shell，由顶部「更多」菜单进入）；/tools 新增为一级页（底栏第二项）。
 const Set<String> _knownPaths = <String>{
   '/', // R-01 主框架（PageView shell）
-  '/home', // R-02（→ /?page=0）
-  '/tools', // R-03（→ /?page=1，一级页：工具集）
+  '/home', // R-02（→ /?page=1，一级页：首页）
+  '/tools', // R-03（→ /?page=2，一级页：工具集）
+  '/todo', // R-13（v1.43.0 → /?page=0，一级页：待办，首页左边）
+  '/todo/archived', // R-15（v1.43.0 P-12 回收站，顶层二级页）
   '/settings', // R-04（顶层二级页：设置）
   '/about', // R-05（顶层二级页：关于）
   '/color-palette', // R-06
@@ -66,19 +70,27 @@ Page<Object?> _pageFor(BuildContext context, Widget child) {
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
-    initialLocation: '/?page=0',
+    // v1.43.0(P-10)：待办为底栏最左(index 0)，但默认启动仍落首页(page=1)。
+    initialLocation: '/?page=1',
     redirect: (context, state) {
       final String path = state.uri.path;
       // v1.10.3（S-13 覆盖增强）：路由跳转日志（开关关闭时零成本）。
       AppLogService.instance.info('router', '路由: ${state.uri}');
-      // T64：/home /tools 映射到 shell 的 PageView 页索引。
-      if (path == '/' || path == '/home') return '/?page=0';
-      if (path == '/tools') return '/?page=1';
+      // T64：/home /tools /todo 映射到 shell 的 PageView 页索引。
+      // v1.43.0(P-10)：待办=page0、首页=page1、工具=page2。裸「/」保持默认
+      //   首页(page=1)；已带 page 参数(如 /?page=0)不重定向(幂等)。
+      final String? page = state.uri.queryParameters['page'];
+      if (path == '/' && page == null) return '/?page=1';
+      if (path == '/todo') return '/?page=0';
+      if (path == '/home') return '/?page=1';
+      if (path == '/tools') return '/?page=2';
+      // v1.44.0：/todo/:taskId(P-11 编辑器) 动态路径前缀放行(R-14)。
+      if (path.startsWith('/todo/')) return null;
       // v1.13.0：/settings /about 为顶层二级页（菜单进入），不 redirect。
       // v1.35.0：/tool/:toolId 动态路径（R-12 通用工具页）前缀放行。
       if (path.startsWith('/tool/')) return null;
-      // R-01 '/' 与未知路径统一回主框架首页（§7）。
-      if (!_knownPaths.contains(path)) return '/?page=0';
+      // R-01 '/' 与未知路径统一回主框架默认首页 page=1（§7）。
+      if (!_knownPaths.contains(path)) return '/?page=1';
       return null;
     },
     routes: <RouteBase>[
@@ -125,6 +137,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: 'R-10',
         pageBuilder: (context, state) =>
             _pageFor(context, const PageP06TimetablePage()),
+      ),
+      // v1.43.0（P-12 / R-15）：回收站（待办页右上入口 push）。
+      GoRoute(
+        path: '/todo/archived',
+        name: 'R-15',
+        pageBuilder: (context, state) =>
+            _pageFor(context, const PageP12ArchivePage()),
+      ),
+      // v1.46.0（P-11 v2 / R-14）：流程图编辑器 vyuh 内核版
+      //   (旧 flutter_flow_chart 版 PageP11FlowEditorPage 待旧内核移除提交)。
+      GoRoute(
+        path: '/todo/:taskId',
+        name: 'R-14',
+        pageBuilder: (context, state) {
+          final String taskId = state.pathParameters['taskId'] ?? '';
+          return _pageFor(context, PageP11V2FlowEditorPage(taskId: taskId));
+        },
       ),
       // v1.34.0（P-08）：Steam 用户查询(工具页入口 / 首页工具卡进入)。
       GoRoute(

@@ -15,7 +15,7 @@ publish_to: 'none'
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.40.0+133
+version: 1.49.0+152
 
 environment:
   sdk: ^3.13.2
@@ -49,6 +49,16 @@ dependencies:
   # v1.26.0（S-21）：每日一言联网（Dart 官方维护;Android HttpClient / Web fetch）。
   http: ^1.5.0
   flutter_secure_storage: 10.0.0
+  # v1.46.0(阶段1):流程图编辑器内核 —— vyuh_node_flow(vendor,阶段0 POC
+  #   验收,见 PLAN_v1.46_flow_vyuh.md;旧 flutter_flow_chart 内核于本版移除)。
+  vyuh_node_flow: ^0.32.0
+  # v1.46.0:vyuh 节点自渲染卡的响应式依赖(Observer)。
+  flutter_mobx: ^2.3.0
+
+# v1.46.0:本地 vendor 覆盖(见上注释)。
+dependency_overrides:
+  vyuh_node_flow:
+    path: third_party/vyuh_node_flow
 
 dev_dependencies:
   flutter_test:

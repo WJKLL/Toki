@@ -114,25 +114,20 @@ class C21CollapsingTitleBar extends ConsumerWidget {
   }
 }
 
-/// ✨ 新功能（v1.3.0 / T7）：C-21 顶部胶囊占位按钮。
+/// C-21 顶栏图标按钮（MIUI 无底，官方 MiuixPressable 遮罩反馈）。
 ///
-/// 样式：36×36、圆角 20、半透明胶囊背景；颜色切换使用**阈值判断**
-/// （监听 [MiuixTopAppBarState] 的 heightOffset，跨过折叠阈值才重建一次），
-/// **禁止**逐帧 lerp / AnimatedBuilder / Opacity（§11.2.4 / T7 约束）。
-/// 🔧 修改（v1.4.0 / C-23）：[collapseState] 改为可空 —— C-23 等非 C-21 场景
-///   传 null 即静态半透明背景（零监听、零重建）。
-///
-/// 功耗要点：
-/// - 阈值未翻转时零重建（监听回调仅在布尔翻转时 setState）；
-/// - collapseState 为 null 时无任何监听（C-23 按钮零开销）；
-/// - 滚动期间不逐帧重建（对比 `lerp`/`AnimatedBuilder` 方案）；
-/// - 监听器在 [dispose] 中移除（全局约束）。
-class C21CapsuleIconButton extends StatefulWidget {
+/// v1.44.x（MIUI 无底化）：原「36×36 半透明胶囊背景 + 折叠阈值换 alpha」为
+/// Material 式常驻背景，不符合 MIUI 设计语言 —— 顶栏导航按钮应为无底纯图标，
+/// 按压仅浮现浅色圆形遮罩（onBackground@0.10，spring 驱动，官方
+/// MiuixPressable 内建）。collapseState 从未被任何调用方传入（10 个二级页均
+/// 只传 icon/tooltip/onTap），随背景一并摘除：组件改为 Stateless，零监听
+/// 零重建。热区 40×40（官方 MiuixIconButtonDefaults.minWidth/minHeight），
+/// 视觉图标 20。
+class C21CapsuleIconButton extends StatelessWidget {
   const C21CapsuleIconButton({
     super.key,
     required this.icon,
     required this.tooltip,
-    this.collapseState,
     this.onTap,
   });
 
@@ -142,97 +137,26 @@ class C21CapsuleIconButton extends StatefulWidget {
   /// 无障碍标签（Semantics）。
   final String tooltip;
 
-  /// 折叠状态源（MiuixTopAppBarState，ChangeNotifier）——C-21 场景由页面 State
-  /// 传入 `_collapseBehavior.state`；为 null 时按钮为静态半透明（零监听）。
-  final MiuixTopAppBarState? collapseState;
-
   final VoidCallback? onTap;
 
-  /// 静态配置（§11.2 / 全局约束）。
-  static const double kSize = 36;
-  static const double kRadius = 20;
+  /// 热区边长 / 视觉图标尺寸（官方 IconButton 默认 40 / 20）。
+  static const double kSize = 40;
   static const double kIconSize = 20;
-
-  /// 展开态 / 折叠态胶囊背景透明度（半透明，随阈值切换）。
-  static const double _expandedAlpha = 0.15;
-  static const double _collapsedAlpha = 0.30;
-
-  /// 折叠阈值：heightOffset 越过折叠行程的一半即视为折叠（负值比较）。
-  static const double _collapseThresholdRatio = 0.5;
-
-  @override
-  State<C21CapsuleIconButton> createState() => _C21CapsuleIconButtonState();
-}
-
-class _C21CapsuleIconButtonState extends State<C21CapsuleIconButton> {
-  /// 阈值判断结果缓存 —— 仅在状态翻转时重建一次。
-  bool _collapsed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.collapseState?.addListener(_onCollapseChanged);
-  }
-
-  @override
-  void didUpdateWidget(C21CapsuleIconButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.collapseState != widget.collapseState) {
-      oldWidget.collapseState?.removeListener(_onCollapseChanged);
-      widget.collapseState?.addListener(_onCollapseChanged);
-      _collapsed = _isCollapsed();
-    }
-  }
-
-  @override
-  void dispose() {
-    // ⚡ 功耗优化：监听器必须移除（全局约束）。
-    widget.collapseState?.removeListener(_onCollapseChanged);
-    super.dispose();
-  }
-
-  /// 阈值判断：heightOffset ∈ [heightOffsetLimit, 0]（0=展开，limit=折叠），
-  /// 越过折叠行程一半即视为折叠。纯比较，零逐帧计算。
-  bool _isCollapsed() {
-    final MiuixTopAppBarState? state = widget.collapseState;
-    if (state == null) return false; // 无折叠源：静态展开态
-    final double limit = state.heightOffsetLimit;
-    if (!limit.isFinite || limit >= 0) return false;
-    return state.heightOffset <=
-        limit * C21CapsuleIconButton._collapseThresholdRatio;
-  }
-
-  void _onCollapseChanged() {
-    final bool collapsed = _isCollapsed();
-    if (collapsed == _collapsed) return; // 阈值未翻转 → 零重建
-    setState(() => _collapsed = collapsed);
-  }
 
   @override
   Widget build(BuildContext context) {
     final MiuixColors colors = MiuixTheme.of(context).colors;
-    // 阈值切换的半透明胶囊背景（无 Opacity / AnimatedOpacity，§11.2.4）。
-    final Color background = colors.onSurface.withValues(
-      alpha: _collapsed
-          ? C21CapsuleIconButton._collapsedAlpha
-          : C21CapsuleIconButton._expandedAlpha,
-    );
-    return Semantics(
-      button: true,
-      label: widget.tooltip,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          width: C21CapsuleIconButton.kSize,
-          height: C21CapsuleIconButton.kSize,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(C21CapsuleIconButton.kRadius),
-          ),
+    return MiuixPressable(
+      onPressed: onTap,
+      semanticLabel: tooltip,
+      borderRadius: BorderRadius.circular(kSize / 2), // 圆形按压遮罩
+      child: SizedBox(
+        width: kSize,
+        height: kSize,
+        child: Center(
           child: MiuixIcon(
-            vector: widget.icon,
-            size: C21CapsuleIconButton.kIconSize,
+            vector: icon,
+            size: kIconSize,
             tint: colors.onSurface,
           ),
         ),

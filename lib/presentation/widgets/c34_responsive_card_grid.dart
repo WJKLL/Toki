@@ -21,6 +21,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/lifecycle/app_lifecycle_controller.dart';
 import '../../core/tools/tool_catalog_store.dart';
 import '../../core/widgets/mini_toast.dart';
 import '../../domain/entities/home_card.dart';
@@ -156,6 +157,18 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
   bool _editing = false;
   int? _armedIndex;
 
+  /// S-24 复位订阅（后台 ≥15s 复位时退出编辑态，防「✕/微缩」残留）。
+  @override
+  void initState() {
+    super.initState();
+    AppLifecycleController.instance.addListener(_onAppReset);
+  }
+
+  void _onAppReset() {
+    if (!mounted) return;
+    if (_editing) _setEditing(false);
+  }
+
   // v1.24.6:拖拽期渲染布局缓存(供 hover 判定:含空槽,避免激活抖动)。
   List<GridPlacement>? _renderPlacements;
   Rect? _dragSlotRect;
@@ -186,6 +199,7 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
 
   @override
   void dispose() {
+    AppLifecycleController.instance.removeListener(_onAppReset);
     _flight.dispose();
     super.dispose();
   }
@@ -589,6 +603,7 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
                                 // v1.25.0:拖拽浮起/飞行期阴影抬升档
                                 // (1.08 浮起 + 阴影加深 → 离桌感;落定
                                 // 与槽位常态阴影同帧替换)。
+                                // v1.44.x:暗色高光内建(CardShadow 默认开)。
                                 elevated: true,
                                 child: _cardWidget(activeCard),
                               ),
@@ -618,6 +633,7 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
     return SizedBox(
       width: w,
       height: h,
+      // v1.44.x：暗色高光已内建进 CardShadow(默认开)。
       child: CardShadow(
         child: AnimatedScale(
           scale: _editing ? 0.94 : 1.0,

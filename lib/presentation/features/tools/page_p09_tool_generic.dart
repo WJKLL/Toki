@@ -11,6 +11,7 @@
 // 转场/响应式:二级页转场由路由 _pageFor 提供;内容 maxWidth 560 居中
 //   (与 P-08 一致,全局单列语言)。
 import 'dart:async' show unawaited;
+import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart' show Material, MaterialType;
@@ -21,19 +22,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/tools/tool_api_service.dart';
 import '../../../core/tools/tool_catalog_store.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../../core/widgets/tool_brand_icon.dart';
 import '../../../domain/entities/tool_config.dart';
-import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../providers/steam_providers.dart';
 import '../../providers/tool_items_provider.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c39_steam_key_sheet.dart';
@@ -66,12 +63,17 @@ class _PageP09ToolGenericPageState
   ToolConfig? _tool;
   _ToolPhase _phase = _ToolPhase.idle;
   Map<String, String> _values = <String, String>{};
+
+  /// 最近一次错误分类（v1.42.0:400 invalid 时错误卡附参数格式参考）。
+  ToolApiError? _errKind;
+
+  /// file 参数已选文件（v1.41.0：multipart 上传）。
+  Map<String, PickedToolFile> _files = <String, PickedToolFile>{};
   ToolApiResult? _result;
   String? _errorText;
   bool _keySheet = false;
 
-  // ── C-25:顶部毛玻璃快照源 + 折叠滚动行为 ──
-  MiuixLayerBackdrop? _topBackdrop;
+  // ── C-25:顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无页面级快照采样)──
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
 
@@ -91,46 +93,62 @@ class _PageP09ToolGenericPageState
     }
   }
 
-  @override
-  void dispose() {
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
-
   bool get _busy => _phase == _ToolPhase.loading;
   bool get _hasResult => _result != null && _phase == _ToolPhase.success;
-
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
 
   /// 提交请求（values 空值过滤交给 Service）。
   Future<void> _submit({bool auto = false}) async {
     if (_busy) return;
     final ToolConfig tool = _tool!;
+    // v1.41.0：file 必选参数未选图 → 拦截提示。
+    for (final ToolParam p in tool.params) {
+      if (p.type == ToolParamType.file &&
+          !_files.containsKey(p.name) &&
+          context.mounted) {
+        showMiniToast(context, '请先选择图片');
+        return;
+      }
+    }
+    // v1.38.1:空值参数兜底 defaultValue(text 框不再预填,留空即用默认)。
+    final Map<String, String> send = Map<String, String>.of(_values);
+    for (final ToolParam p in tool.params) {
+      final String v = send[p.name] ?? '';
+      if (v.trim().isEmpty && p.defaultValue != null) {
+        send[p.name] = p.defaultValue!;
+      }
+    }
+    // v1.42.0:纯文本型参数全空 → 本地拦截(如 GitHub 用户名/仓库),
+    //   避免空参直发撞 400「参数无效」;number/select/file 不动(可空有默认)。
+    final List<ToolParam> textParams = <ToolParam>[
+      for (final ToolParam p in tool.params)
+        if (p.type == ToolParamType.text) p,
+    ];
+    if (textParams.isNotEmpty &&
+        textParams.every(
+          (ToolParam p) => (send[p.name] ?? '').trim().isEmpty,
+        ) &&
+        context.mounted) {
+      showMiniToast(context, '请填写${textParams.first.label}');
+      return;
+    }
     setState(() {
       _phase = _ToolPhase.loading;
       _errorText = null;
+      _errKind = null;
     });
     try {
       // 实时读 UAPI key（加密存储,与 P-08 同款;匿名可用）。
       final String? key = await ref.read(steamAuthServiceProvider).readApiKey();
-      // v1.38.1:空值参数兜底 defaultValue(text 框不再预填,留空即用默认)。
-      final Map<String, String> send = Map<String, String>.of(_values);
-      for (final ToolParam p in tool.params) {
-        final String v = send[p.name] ?? '';
-        if (v.trim().isEmpty && p.defaultValue != null) {
-          send[p.name] = p.defaultValue!;
-        }
-      }
       final ToolApiResult result = await ref
           .read(toolApiServiceProvider)
-          .call(tool: tool, values: send, apiKey: key);
+          .call(
+            tool: tool,
+            values: send,
+            apiKey: key,
+            files: _files.map(
+              (String k, PickedToolFile f) => MapEntry<String, Uint8List>(k, f.bytes),
+            ),
+          );
       if (!mounted) return;
       setState(() {
         _result = result;
@@ -140,6 +158,7 @@ class _PageP09ToolGenericPageState
       if (!mounted) return;
       setState(() {
         _errorText = e.message;
+        _errKind = e.error;
         _phase = _ToolPhase.error;
       });
       if (e.error == ToolApiError.needsKey) {
@@ -149,6 +168,7 @@ class _PageP09ToolGenericPageState
       if (!mounted) return;
       setState(() {
         _errorText = '请求失败，请稍后重试';
+        _errKind = null;
         _phase = _ToolPhase.error;
       });
     }
@@ -157,13 +177,6 @@ class _PageP09ToolGenericPageState
   @override
   Widget build(BuildContext context) {
     final ToolConfig? tool = _tool;
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled
@@ -177,7 +190,6 @@ class _PageP09ToolGenericPageState
         largeTitle: tool?.name ?? '工具',
         navigationIcon: _backButton,
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         final Widget page = Center(
@@ -206,13 +218,8 @@ class _PageP09ToolGenericPageState
             ),
           ),
         );
+        // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget listWithBg = ColoredBox(color: colors.surface, child: page);
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : listWithBg;
         return Material(
           type: MaterialType.transparency,
           child: Column(
@@ -222,7 +229,7 @@ class _PageP09ToolGenericPageState
               Expanded(
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
               // UAPI 密钥弹层(C-39 复用;show 布尔驱动)。
@@ -308,6 +315,8 @@ class _PageP09ToolGenericPageState
                   C40ToolDynamicParams(
                     params: tool.params,
                     onChanged: (Map<String, String> v) => _values = v,
+                    onFilesChanged: (Map<String, PickedToolFile> f) =>
+                        _files = f,
                   ),
                 const SizedBox(height: 14),
                 // 全宽主按钮(文字色由按钮内容色注入:禁用自动切换)。
@@ -345,6 +354,43 @@ class _PageP09ToolGenericPageState
     // 与 Steam P-08 的输入卡同体系：参数输入已并入 _buildInfoCard，
     // 此处为未来扩展预留（区分「说明区」与「提交区」视觉层次）。
     return const SizedBox.shrink();
+  }
+
+  /// 参数格式参考行(400 参数无效时展示,帮助按 placeholder 示例填写)。
+  Widget _buildParamHints(BuildContext context, ToolConfig tool) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final MiuixTextStyles ts = MiuixTheme.of(context).textStyles;
+    final List<String> lines = <String>[
+      for (final ToolParam p in tool.params)
+        if (p.type == ToolParamType.text || p.type == ToolParamType.number)
+          '${p.label}：${p.placeholder ?? (p.type == ToolParamType.number ? '数字' : '文本')}'
+        else if (p.type == ToolParamType.select && p.options.isNotEmpty)
+          '${p.label}：可选 ${p.options.join(' / ')}',
+    ];
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          MiuixText(
+            '参数填写参考：',
+            style: ts.body2,
+            color: colors.onSurfaceVariantActions,
+          ),
+          const SizedBox(height: 2),
+          for (final String line in lines)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: MiuixText(
+                '· $line',
+                fontSize: 11,
+                color: colors.onSurfaceVariantSummary,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildKeyRow(BuildContext context) {
@@ -435,6 +481,10 @@ class _PageP09ToolGenericPageState
                       color:
                           MiuixTheme.of(context).colors.onSurfaceVariantSummary,
                     ),
+                    // v1.42.0:400「参数无效」→ 附参数格式参考(服务端常无
+                    //   错误体,如 GitHub 仓库需 owner/repo 完整格式)。
+                    if (_errKind == ToolApiError.invalid)
+                      _buildParamHints(context, tool),
                     const SizedBox(height: 14),
                     MiuixButton(
                       key: const ValueKey('tool.retry'),

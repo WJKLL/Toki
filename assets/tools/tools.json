@@ -220,6 +220,123 @@
           ],
           "displayType": "image",
           "result": { "source": "body" }
+        },
+        {
+          "id": "img_compress",
+          "name": "图片压缩",
+          "summary": "无损压缩图片体积",
+          "icon": "convertFile",
+          "apiPath": "/api/v1/image/compress",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "图片（≤15MB）", "type": "file", "in": "body" },
+            { "name": "level", "label": "压缩级别", "type": "select", "options": ["1", "2", "3", "4", "5"], "defaultValue": "3", "in": "query" },
+            { "name": "format", "label": "输出格式", "type": "select", "options": ["png", "jpeg"], "defaultValue": "png", "in": "query" }
+          ],
+          "displayType": "image",
+          "result": { "source": "body" }
+        },
+        {
+          "id": "img_ocr",
+          "name": "OCR 文字识别",
+          "summary": "图片文字提取",
+          "icon": "notes",
+          "apiPath": "/api/v1/image/ocr",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "图片（≤10MB）", "type": "file", "in": "body" }
+          ],
+          "displayType": "text",
+          "result": { "field": "text" }
+        },
+        {
+          "id": "img_matting",
+          "name": "图片抠图",
+          "summary": "一键去除图片背景",
+          "icon": "photos",
+          "apiPath": "/api/v1/image/matting",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "待抠图图片", "type": "file", "in": "body" }
+          ],
+          "displayType": "image",
+          "result": { "source": "field", "imageField": "image_base64" }
+        },
+        {
+          "id": "img_nsfw",
+          "name": "图片敏感检测",
+          "summary": "AI 内容安全评分",
+          "icon": "info",
+          "apiPath": "/api/v1/image/nsfw",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "图片（≤20MB）", "type": "file", "in": "body" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "is_nsfw", "label": "是否敏感" },
+              { "key": "label", "label": "类别", "map": { "normal": "正常" } },
+              { "key": "risk_level", "label": "风险", "map": { "low": "低", "medium": "中", "high": "高" } },
+              { "key": "suggestion", "label": "建议", "map": { "pass": "放行", "block": "拦截", "review": "人工审核" } },
+              { "key": "nsfw_score", "label": "敏感度" },
+              { "key": "normal_score", "label": "正常度" }
+            ]
+          }
+        },
+        {
+          "id": "wm_embed",
+          "name": "图片隐水印",
+          "summary": "图片嵌入隐形标识",
+          "icon": "scan",
+          "apiPath": "/api/v1/watermark/embed",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "图片（PNG/JPG/WebP）", "type": "file", "in": "body" },
+            { "name": "payload", "label": "水印内容", "type": "text", "placeholder": "≤ 9 字符（默认档）", "in": "body" }
+          ],
+          "displayType": "image",
+          "result": { "source": "field", "imageField": "image_base64" }
+        },
+        {
+          "id": "wm_decode",
+          "name": "水印提取",
+          "summary": "读取图片隐藏标识",
+          "icon": "scan",
+          "apiPath": "/api/v1/watermark/decode",
+          "method": "POST",
+          "costCredits": 2,
+          "params": [
+            { "name": "file", "label": "图片（PNG/JPG/WebP）", "type": "file", "in": "body" }
+          ],
+          "displayType": "keyValue",
+          "result": {
+            "fields": [
+              { "key": "present", "label": "是否含水印" },
+              { "key": "payload", "label": "水印内容" },
+              { "key": "confidence", "label": "置信度" }
+            ]
+          }
+        },
+        {
+          "id": "speechless",
+          "name": "表情包生成",
+          "summary": "「你们怎么不说话了」配文图",
+          "icon": "answer",
+          "apiPath": "/api/v1/image/speechless",
+          "method": "POST",
+          "costCredits": 1,
+          "params": [
+            { "name": "top_text", "label": "上方文字", "type": "text", "placeholder": "你们怎么不说话了", "in": "body" },
+            { "name": "bottom_text", "label": "下方文字", "type": "text", "placeholder": "求求你…", "in": "body" }
+          ],
+          "displayType": "image",
+          "result": { "source": "body" }
         }
       ]
     },

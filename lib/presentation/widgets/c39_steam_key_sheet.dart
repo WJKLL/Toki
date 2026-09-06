@@ -72,8 +72,10 @@ class _SteamKeySheetState extends ConsumerState<SteamKeySheet> {
     return MiuixOverlayDialog(
       show: widget.show,
       title: 'UAPI 密钥',
-      summary: 'Steam 查询凭证(选填)。部分请求计入积分;可在 '
-          'uapis.cn 控制台获取。密钥仅加密保存在本机,不明文回显。',
+      summary: 'UAPI 凭证(选填,以 Authorization: Bearer 头发送)。'
+          '不填则以访客额度匿名调用,多数工具可用;'
+          '部分请求计入积分,可在 uapis.cn 控制台获取密钥。'
+          '密钥仅加密保存在本机,不明文回显。',
       onDismissRequest: widget.onDismissRequest,
       content: Padding(
         padding: const EdgeInsets.only(top: 4),

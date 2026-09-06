@@ -106,6 +106,9 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
         final int id =
             ('course_alarm_${c.id}_${day.year}${day.month}${day.day}')
                 .hashCode & 0x7fffffff;
+        // v1.40.1(C 方案):课程闹钟携带结束参数 —— 到点原生直启倒计时
+        // 常驻(App 不在也出现);时间未设置(span null)则仅弹到点通知。
+        final _Span? span = _spanOf(c, periods);
         unawaited(
           ReminderService.scheduleAlert(
             id: id,
@@ -114,6 +117,20 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
             body:
                 '${Course.periodLabel(c.start, c.len)} · '
                 '${ClassPeriod.formatMinutes(p.startMinutes)} 开始',
+            endAtMillis: span == null
+                ? null
+                : DateTime(
+                    day.year,
+                    day.month,
+                    day.day,
+                    span.end ~/ 60,
+                    span.end % 60,
+                  ).millisecondsSinceEpoch,
+            totalMinutes: span == null ? null : span.end - span.start,
+            endText: span == null
+                ? null
+                : '${Course.periodLabel(c.start, c.len)} · '
+                      '${ClassPeriod.formatMinutes(span.end)} 结束',
           ),
         );
       }
@@ -122,16 +139,22 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
 
   // ── 常驻通知（上课中）：启动原生自治倒计时 / 下课停 ────────────
 
-  /// 该课覆盖启用节次的**结束分钟**（0 点起；与 currentClassProvider 一致）。
-  int _endMinutesOf(Course c, List<ClassPeriod> periods) {
-    int end = 0;
+  /// 该课覆盖启用节次的**整段起止分钟**（0 点起；与 currentClassProvider
+  /// 首末节次算法一致）。覆盖节次全未启用 → null（时间缺失，无常驻）。
+  _Span? _spanOf(Course c, List<ClassPeriod> periods) {
     final int first = (c.start - 1).clamp(0, periods.length - 1);
     final int last = (c.start + c.len - 2).clamp(first, periods.length - 1);
+    int? start;
+    int end = 0;
     for (int i = first; i <= last; i++) {
       final ClassPeriod p = periods[i];
-      if (p.enabled && p.endMinutes > p.startMinutes) end = p.endMinutes;
+      if (p.enabled && p.endMinutes > p.startMinutes) {
+        start ??= p.startMinutes;
+        end = p.endMinutes;
+      }
     }
-    return end;
+    if (start == null || end <= start) return null;
+    return _Span(start, end);
   }
 
   void _onCurrentClass(CurrentClass? cur) {
@@ -140,8 +163,8 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
       return;
     }
     final List<ClassPeriod> periods = ref.read(appSettingsProvider).classPeriods;
-    final int endMin = _endMinutesOf(cur.course, periods);
-    if (endMin <= 0) {
+    final _Span? span = _spanOf(cur.course, periods);
+    if (span == null) {
       unawaited(ReminderService.stopCountdown());
       return;
     }
@@ -150,8 +173,8 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
       now.year,
       now.month,
       now.day,
-      endMin ~/ 60,
-      endMin % 60,
+      span.end ~/ 60,
+      span.end % 60,
     );
     unawaited(
       ReminderService.startCountdown(
@@ -162,4 +185,12 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
       ),
     );
   }
+}
+
+/// 课程覆盖节次的整段计时（分钟；0 点起）。
+class _Span {
+  const _Span(this.start, this.end);
+
+  final int start;
+  final int end;
 }

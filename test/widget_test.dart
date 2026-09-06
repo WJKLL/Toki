@@ -7,10 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
+import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 import 'package:xiangjugong/presentation/widgets/c34_responsive_card_grid.dart';
 import 'package:xiangjugong/presentation/widgets/cards/card_summary.dart';
 
@@ -31,12 +33,17 @@ void main() {
           agreementRepositoryProvider.overrideWithValue(
             AgreementRepositoryImpl(prefs),
           ),
+          // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
+          todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
         ],
         child: const XiangJuGongApp(),
       ),
     );
     // 等待路由首帧与主题注入完成。
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    // v1.43.0：初始落首页(page=1)由深链 jumpToPage 触发 ScrollEnd →
+    // S-16 高刷释放 3s Timer，需消化避免 Pending timers。
+    await tester.pump(const Duration(seconds: 4));
 
     // 首页存在（应用名 + 摘要卡 + 卡片网格；v1.26.0:断言锚点从已下线
     // 的旧首页入口('色彩调色板')更新为当前首页结构)。

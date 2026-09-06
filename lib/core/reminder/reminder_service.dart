@@ -19,12 +19,17 @@ abstract final class ReminderService {
   }
 
   /// 排一个到点提醒精确闹钟（[at] 到点弹「title/body」通知；同 [id] 覆盖）。
-  /// 返回是否成功（原生异常会带日志，不再静默）。
+  /// v1.40.1(C 方案)：课程闹钟可携带 [endAtMillis]/[totalMinutes]/[endText]，
+  /// 到点广播会**原生直启倒计时常驻**（App 不在也出现）；不传则仅弹到点通知
+  /// （测试/非课程闹钟）。返回是否成功（原生异常会带日志，不再静默）。
   static Future<bool> scheduleAlert({
     required int id,
     required DateTime at,
     required String title,
     required String body,
+    int? endAtMillis,
+    int? totalMinutes,
+    String? endText,
   }) async {
     try {
       await _channel.invokeMethod<void>('scheduleAlert', <String, Object?>{
@@ -32,6 +37,9 @@ abstract final class ReminderService {
         'atMillis': at.millisecondsSinceEpoch,
         'title': title,
         'body': body,
+        'endAtMillis': ?endAtMillis,
+        'totalMinutes': ?totalMinutes,
+        'endText': ?endText,
       });
       return true;
     } on PlatformException catch (e) {

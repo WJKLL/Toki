@@ -4,6 +4,7 @@
 //   不改代码（复用率目标 >90%）。
 //   - 方法：GET(query) / POST(json body) / POST(json body + query 混合)，
 //     参数归属由 ToolParam.inQuery 决定（实测：翻译 to_lang 走 query）；
+//   - 鉴权(v1.42.0)：UAPI 现行 `Authorization: Bearer <key>` 头；无 key 匿名；
 //   - **双态返回**：JSON 接口返回 [ToolApiResult.json]，图片接口返回
 //     [ToolApiResult.bytes]（实测必应壁纸/二维码/新闻图直接返回图片字节；
 //     http 默认 followRedirects 自动跟随 302 —— 随机图片）；
@@ -130,17 +131,20 @@ class ToolApiService {
   };
 
   /// 调用一个工具。参数 [values] = 参数名 → 用户输入值（已过滤空值）。
-  /// [apiKey] 可选：非空自动加 query `key`（UAPI 惯例；匿名可用）。
+  /// [files] = file 类型参数名 → 字节（v1.41.0：存在 → multipart/form-data
+  /// 上传，其余文本参数按归属进 query/fields）。[apiKey] 可选：非空自动加
+  /// query `key`（UAPI 惯例；匿名可用）。
   Future<ToolApiResult> call({
     required ToolConfig tool,
     required Map<String, String> values,
     String? apiKey,
+    Map<String, Uint8List>? files,
   }) async {
     if (tool.requiresAuth && (apiKey == null || apiKey.trim().isEmpty)) {
       throw const ToolApiException(ToolApiError.needsKey);
     }
     await _sem.acquire();
-    final String key = _requestKey(tool, values, apiKey);
+    final String key = _requestKey(tool, values, apiKey, files);
     final Future<ToolApiResult>? existing = _inflight[key];
     if (existing != null) {
       // 在途同参请求：复用，不重复发起。
@@ -151,6 +155,7 @@ class ToolApiService {
       tool,
       values,
       apiKey,
+      files,
     ).whenComplete(() {
       // ignore: discarded_futures —— Map.remove 返回被移除的 Future 值，此处仅清表。
       _inflight.remove(key);
@@ -164,24 +169,29 @@ class ToolApiService {
     ToolConfig tool,
     Map<String, String> values,
     String? apiKey,
+    Map<String, Uint8List>? files,
   ) {
     final List<String> kvs = <String>[
       for (final MapEntry<String, String> e in values.entries)
         '${e.key}=${e.value}',
     ]..sort();
-    return '${tool.method}|${tool.apiPath}|${kvs.join('&')}|$apiKey';
+    final String fileKey = files == null || files.isEmpty
+        ? ''
+        : '<f:${files.keys.join(',')}:${files.values.fold<int>(0, (a, b) => a + b.length)}>';
+    return '${tool.method}|${tool.apiPath}|${kvs.join('&')}|$fileKey|$apiKey';
   }
 
   Future<ToolApiResult> _perform(
     ToolConfig tool,
     Map<String, String> values,
     String? apiKey,
+    Map<String, Uint8List>? files,
   ) async {
     // v1.38.1:网络层抖动(超时/连接失败)自动重试 1 次 —— UAPI 个别接口
     // (如 MC 曾用名)依赖上游国际服务,偶发慢/断,重试可自愈;4xx/5xx 不重试。
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
-        return await _request(tool, values, apiKey);
+        return await _request(tool, values, apiKey, files);
       } on TimeoutException {
         if (attempt == 0) continue;
         throw const ToolApiException(ToolApiError.network);
@@ -197,6 +207,7 @@ class ToolApiService {
     ToolConfig tool,
     Map<String, String> values,
     String? apiKey,
+    Map<String, Uint8List>? files,
   ) async {
     final bool get = tool.method != 'POST';
     final Map<String, String> query = <String, String>{};
@@ -204,24 +215,55 @@ class ToolApiService {
     for (final ToolParam p in tool.params) {
       final String? v = values[p.name];
       if (v == null || v.isEmpty) continue;
+      if (p.type == ToolParamType.file) continue; // 文件走 files 通道。
       (get || p.inQuery ? query : body)[p.name] = v;
     }
     final String key = apiKey == null ? '' : apiKey.trim();
-    if (key.isNotEmpty) query['key'] = key;
+    // v1.42.0:UAPI 现行鉴权 = `Authorization: Bearer <key>` 头(实测 query
+    //   `key=` 会被校验并 401 INVALID_API_KEY,即使无效 key 也拒绝全部请求);
+    //   无 key → 不带凭证头,走访客额度(匿名可用,实测 200)。
+    final Map<String, String> headers = <String, String>{
+      ..._headers,
+      if (key.isNotEmpty) 'Authorization': 'Bearer $key',
+    };
 
     final Uri uri = Uri.parse(
       '${AppConstants.uapiBaseUrl}${tool.apiPath}',
     ).replace(queryParameters: query.isEmpty ? null : query);
 
+    // v1.41.0(C 批):file 参数 → multipart/form-data 上传。
+    final bool hasFile = files != null && files.isNotEmpty;
     final http.Response resp;
     if (get) {
-      resp = await _client.get(uri, headers: _headers).timeout(timeout);
+      resp = await _client.get(uri, headers: headers).timeout(timeout);
+    } else if (hasFile) {
+      final http.MultipartRequest req = http.MultipartRequest('POST', uri);
+      req.headers.addAll(headers);
+      for (final MapEntry<String, String> e in body.entries) {
+        req.fields[e.key] = e.value;
+      }
+      for (final ToolParam p in tool.params) {
+        if (p.type != ToolParamType.file) continue; // hasFile 分支 files 已非空。
+        final Uint8List? bytes = files[p.name];
+        if (bytes == null || bytes.isEmpty) continue;
+        req.files.add(
+          http.MultipartFile.fromBytes(
+            p.name,
+            bytes,
+            filename: _uploadName(p, bytes),
+          ),
+        );
+      }
+      final http.StreamedResponse streamed = await _client
+          .send(req)
+          .timeout(timeout);
+      resp = await http.Response.fromStream(streamed);
     } else {
       resp = await _client
           .post(
             uri,
             headers: <String, String>{
-              ..._headers,
+              ...headers,
               'Content-Type': 'application/json',
             },
             body: body.isEmpty ? '{}' : jsonEncode(body),
@@ -236,6 +278,18 @@ class ToolApiService {
       );
     }
     return _parseResult(resp);
+  }
+
+  /// multipart 文件名：无扩展名时按魔数补（png/jpg），服务端依赖扩展名推断。
+  static String _uploadName(ToolParam p, Uint8List bytes) {
+    final String base = 'toki_${p.name}';
+    if (bytes.length >= 4) {
+      if (bytes[0] == 0x89 && bytes[1] == 0x50) return '$base.png';
+      if (bytes[0] == 0xFF && bytes[1] == 0xD8) return '$base.jpg';
+      if (bytes[0] == 0x47 && bytes[1] == 0x49) return '$base.gif';
+      if (bytes[0] == 0x52 && bytes[1] == 0x49) return '$base.webp';
+    }
+    return '$base.bin';
   }
 
   ToolApiException _errorForStatus(int status, String bodyText) {

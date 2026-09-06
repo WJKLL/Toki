@@ -10,7 +10,6 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/widgets/app_icons.dart';
-import '../../core/widgets/card_dark_glow.dart';
 import '../../domain/entities/tool_config.dart';
 import 'c34_responsive_card_grid.dart';
 import 'c36_tool_entry_button.dart';
@@ -49,11 +48,11 @@ class _C42ToolCategoryPanelState extends ConsumerState<C42ToolCategoryPanel> {
           sinkAmount: 0.96,
           borderRadius: BorderRadius.circular(14),
           onPressed: () => setState(() => _expanded = !_expanded),
+          // v1.44.x：暗色高光内建进 CardShadow(此处原 CardDarkGlow 撤除,
+          // 防双重描边)。
           child: CardShadow(
             radius: 14,
-            child: CardDarkGlow(
-              radius: 14,
-              child: Container(
+            child: Container(
                 height: 46,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
@@ -99,7 +98,6 @@ class _C42ToolCategoryPanelState extends ConsumerState<C42ToolCategoryPanel> {
                   ],
                 ),
               ),
-            ),
           ),
         ),
         // ── 展开区:顶部缩进分割线(标题/内容分界)+ 网格(懒渲染)──

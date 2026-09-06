@@ -124,6 +124,12 @@ class _KernelFloatingBottomBarState extends State<KernelFloatingBottomBar>
     super.initState();
     _drag = DampedDragController(vsync: this, tabCount: widget.items.length)
       ..addListener(_onDragChanged);
+    // v1.43.0：冷启动默认页非 0(待办在左、默认首页=1 等)时指示器直接落位。
+    //   mount 首帧不走 didUpdateWidget,控制器初值 0 会把指示器停在 index 0,
+    //   与当前页(首页)错位 —— 用 updateValueDirect 无动画落位到选中页。
+    if (widget.selectedIndex > 0) {
+      _drag.updateValueDirect(widget.selectedIndex.toDouble());
+    }
   }
 
   void _onDragChanged() => setState(() {});

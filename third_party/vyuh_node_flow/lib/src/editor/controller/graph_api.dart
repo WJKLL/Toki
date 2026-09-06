@@ -1,0 +1,690 @@
+part of 'node_flow_controller.dart';
+
+/// Graph-level operations for [NodeFlowController].
+///
+/// This extension provides methods for:
+/// - Loading and exporting complete graphs
+/// - Graph analysis and validation
+/// - Layout and arrangement operations
+/// - Batch selection operations
+/// - Theme and event configuration
+/// - Keyboard shortcuts
+extension GraphApi<T, C> on NodeFlowController<T, C> {
+  // ============================================================================
+  // Graph Loading & Export
+  // ============================================================================
+
+  /// Loads a complete graph into the controller.
+  ///
+  /// This method:
+  /// 1. Clears the existing graph state
+  /// 2. Bulk loads all nodes and connections
+  /// 3. Sets the viewport to match the saved state
+  /// 4. Sets up visual positioning and hit-testing infrastructure (if editor initialized)
+  ///
+  /// This is the preferred method for loading saved graphs as it performs
+  /// efficient bulk loading rather than individual additions.
+  ///
+  /// **Note**: If the editor is not yet initialized (i.e., [_initController] hasn't
+  /// been called), the infrastructure setup is deferred until initialization.
+  /// This is the correct behavior for graphs loaded before the editor widget mounts.
+  ///
+  /// Parameters:
+  /// - `graph`: The graph to load containing nodes, connections, and viewport state
+  ///
+  /// Example:
+  /// ```dart
+  /// final graph = NodeGraph<MyData>(
+  ///   nodes: savedNodes,
+  ///   connections: savedConnections,
+  ///   viewport: savedViewport,
+  /// );
+  /// controller.loadGraph(graph);
+  /// ```
+  void loadGraph(NodeGraph<T, C> graph) {
+    runInAction(() {
+      // Clear existing state
+      clearGraph();
+
+      // Bulk load all data structures
+      for (final node in graph.nodes) {
+        _nodes[node.id] = node;
+      }
+      _connections.addAll(graph.connections);
+      for (final conn in graph.connections) {
+        _connectionById[conn.id] = conn;
+        _connectionsByNodeId
+            .putIfAbsent(conn.sourceNodeId, () => <String>{})
+            .add(conn.id);
+        _connectionsByNodeId
+            .putIfAbsent(conn.targetNodeId, () => <String>{})
+            .add(conn.id);
+      }
+
+      // Set viewport
+      _viewport.value = graph.viewport;
+      _cullingViewport.value = graph.viewport;
+      _cameraViewport.value = graph.viewport;
+
+      // Set up infrastructure if editor is already initialized.
+      // If not initialized yet, _initController will handle this when called.
+      if (_editorInitialized) {
+        _initializeLoadedNodes();
+        _rebuildSpatialIndexes();
+      }
+    });
+  }
+
+  /// Exports the current graph state including all nodes, connections, and viewport.
+  ///
+  /// This creates a snapshot of the entire graph that can be serialized and saved.
+  /// Use `loadGraph` to restore the graph from the exported data.
+  ///
+  /// Note: GroupNode and CommentNode are included in the nodes list and will be
+  /// serialized with their specific type fields for proper deserialization.
+  ///
+  /// Returns a [NodeGraph] containing all current graph data.
+  ///
+  /// Example:
+  /// ```dart
+  /// // Export the graph
+  /// final graph = controller.exportGraph();
+  ///
+  /// // Save to JSON
+  /// final json = graph.toJson();
+  /// ```
+  NodeGraph<T, C> exportGraph() {
+    return NodeGraph<T, C>(
+      nodes: _nodes.values.toList(),
+      connections: _connections.toList(),
+      viewport: _cameraViewport.value,
+    );
+  }
+
+  /// Clears the entire graph, removing all nodes, connections, and selections.
+  ///
+  /// This operation:
+  /// - Removes all nodes (including GroupNode and CommentNode)
+  /// - Removes all connections
+  /// - Clears all selections
+  /// - Clears node monitoring reactions
+  /// - Clears the connection painter cache
+  ///
+  /// Does nothing if the graph is already empty.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.clearGraph();
+  /// ```
+  void clearGraph() {
+    if (_nodes.isEmpty && _connections.isEmpty) return;
+
+    // Detach context from groupable nodes before clearing
+    for (final node in _nodes.values) {
+      if (node is GroupableMixin<T>) {
+        node.detachContext();
+      }
+    }
+
+    runInAction(() {
+      _nodes.clear();
+      _connections.clear();
+      _connectionById.clear();
+      _connectionsByNodeId.clear();
+      _selectedNodeIds.clear();
+      _selectedConnectionIds.clear();
+    });
+
+    // Clear spatial indexes to prevent stale hit test entries
+    _spatialIndex.clear();
+
+    // Clear connection painter cache to prevent stale paths
+    _connectionPainter?.clearAllCachedPaths();
+  }
+
+  // ============================================================================
+  // Graph Analysis
+  // ============================================================================
+
+  /// Gets all nodes that have no connections.
+  ///
+  /// Returns a list of nodes that are neither sources nor targets of any connections.
+  /// Useful for identifying isolated or unused nodes in the graph.
+  ///
+  /// Returns a list of orphan nodes (may be empty).
+  ///
+  /// Example:
+  /// ```dart
+  /// final orphans = controller.getOrphanNodes();
+  /// print('Found ${orphans.length} orphan nodes');
+  /// ```
+  List<Node<T>> getOrphanNodes() {
+    final connectedNodeIds = <String>{};
+    for (final connection in _connections) {
+      connectedNodeIds.add(connection.sourceNodeId);
+      connectedNodeIds.add(connection.targetNodeId);
+    }
+    return _nodes.values
+        .where((node) => !connectedNodeIds.contains(node.id))
+        .toList();
+  }
+
+  /// Detects cycles in the graph using depth-first search.
+  ///
+  /// A cycle exists when you can follow connections from a node and eventually
+  /// return to the same node.
+  ///
+  /// Returns a list of cycles, where each cycle is represented as a list of node IDs
+  /// forming the cycle. Returns an empty list if no cycles are found.
+  ///
+  /// Example:
+  /// ```dart
+  /// final cycles = controller.detectCycles();
+  /// if (cycles.isNotEmpty) {
+  ///   print('Found ${cycles.length} cycles in the graph');
+  ///   for (final cycle in cycles) {
+  ///     print('Cycle: ${cycle.join(' -> ')}');
+  ///   }
+  /// }
+  /// ```
+  List<List<String>> detectCycles() {
+    // Simple cycle detection implementation
+    final cycles = <List<String>>[];
+    final visited = <String>{};
+    final recursionStack = <String>{};
+
+    void dfs(String nodeId, List<String> path) {
+      if (recursionStack.contains(nodeId)) {
+        // Found a cycle
+        final cycleStart = path.indexOf(nodeId);
+        if (cycleStart >= 0) {
+          cycles.add(path.sublist(cycleStart));
+        }
+        return;
+      }
+
+      if (visited.contains(nodeId)) return;
+
+      visited.add(nodeId);
+      recursionStack.add(nodeId);
+      path.add(nodeId);
+
+      // Follow outgoing connections
+      final outgoingConnections = _connections.where(
+        (c) => c.sourceNodeId == nodeId,
+      );
+      for (final conn in outgoingConnections) {
+        dfs(conn.targetNodeId, List.from(path));
+      }
+
+      recursionStack.remove(nodeId);
+      path.removeLast();
+    }
+
+    for (final node in _nodes.values) {
+      if (!visited.contains(node.id)) {
+        dfs(node.id, []);
+      }
+    }
+
+    return cycles;
+  }
+
+  /// Tests if a point hits any connection.
+  ///
+  /// Uses the connection painter's hit-testing to determine if the given
+  /// graph position intersects with any connection path.
+  ///
+  /// Parameters:
+  /// - [graphPosition]: The position to test in graph/world coordinates
+  ///
+  /// Returns the connection ID if hit, `null` otherwise.
+  ///
+  /// Example:
+  /// ```dart
+  /// final hitConnectionId = controller.hitTestConnections(Offset(100, 100));
+  /// if (hitConnectionId != null) {
+  ///   print('Clicked on connection: $hitConnectionId');
+  /// }
+  /// ```
+  String? hitTestConnections(Offset graphPosition) {
+    // Use the controller's connection painter for hit-testing
+    final painter = connectionPainter;
+
+    // Check connections for hit-testing
+    for (final connection in _connections) {
+      final sourceNode = getNode(connection.sourceNodeId);
+      final targetNode = getNode(connection.targetNodeId);
+
+      if (sourceNode != null && targetNode != null) {
+        if (painter.hitTestConnection(
+          connection: connection,
+          sourceNode: sourceNode,
+          targetNode: targetNode,
+          testPoint: graphPosition,
+        )) {
+          return connection.id;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Gets all connections whose segment bounds intersect with the given bounds.
+  ///
+  /// Uses spatial index for fast candidate filtering, then precise segment
+  /// bounds check on candidates.
+  ///
+  /// Parameters:
+  /// - [bounds]: The rectangular area to test in graph/world coordinates
+  /// - [excludeNodeId]: Optional node ID to exclude connections involving this node
+  ///
+  /// Returns list of matching connections.
+  ///
+  /// Example:
+  /// ```dart
+  /// final connections = controller.getConnectionsInBounds(selectionRect);
+  /// ```
+  List<Connection<C>> getConnectionsInBounds(
+    Rect bounds, {
+    String? excludeNodeId,
+  }) {
+    // Use spatial index for O(log n) candidate filtering
+    final candidates = _spatialIndex.connectionsIn(bounds);
+    if (candidates.isEmpty) return [];
+
+    final cache = connectionPathCache;
+    final results = <Connection<C>>[];
+
+    for (final connection in candidates) {
+      // Skip connections involving the excluded node
+      if (excludeNodeId != null &&
+          (connection.sourceNodeId == excludeNodeId ||
+              connection.targetNodeId == excludeNodeId)) {
+        continue;
+      }
+
+      final sourceNode = getNode(connection.sourceNodeId);
+      final targetNode = getNode(connection.targetNodeId);
+      if (sourceNode == null || targetNode == null) continue;
+
+      // Precise segment bounds check using cache (data layer)
+      if (cache.connectionIntersectsBounds(
+        connection: connection,
+        sourceNode: sourceNode,
+        targetNode: targetNode,
+        bounds: bounds,
+      )) {
+        results.add(connection);
+      }
+    }
+
+    return results;
+  }
+
+  /// Finds the first connection whose segment bounds intersect with the given bounds.
+  ///
+  /// Same as [getConnectionsInBounds] but returns only the first match.
+  /// More efficient when you only need one result.
+  ///
+  /// Parameters:
+  /// - [bounds]: The rectangular area to test in graph/world coordinates
+  /// - [excludeNodeId]: Optional node ID to exclude connections involving this node
+  ///
+  /// Returns the connection if found, `null` otherwise.
+  ///
+  /// Example:
+  /// ```dart
+  /// final connection = controller.getFirstConnectionInBounds(
+  ///   nodeBounds,
+  ///   excludeNodeId: draggedNode.id,
+  /// );
+  /// ```
+  Connection<C>? getFirstConnectionInBounds(
+    Rect bounds, {
+    String? excludeNodeId,
+  }) {
+    // Use spatial index for O(log n) candidate filtering
+    final candidates = _spatialIndex.connectionsIn(bounds);
+    if (candidates.isEmpty) return null;
+
+    final cache = connectionPathCache;
+
+    for (final connection in candidates) {
+      // Skip connections involving the excluded node
+      if (excludeNodeId != null &&
+          (connection.sourceNodeId == excludeNodeId ||
+              connection.targetNodeId == excludeNodeId)) {
+        continue;
+      }
+
+      final sourceNode = getNode(connection.sourceNodeId);
+      final targetNode = getNode(connection.targetNodeId);
+      if (sourceNode == null || targetNode == null) continue;
+
+      // Precise segment bounds check using cache (data layer)
+      if (cache.connectionIntersectsBounds(
+        connection: connection,
+        sourceNode: sourceNode,
+        targetNode: targetNode,
+        bounds: bounds,
+      )) {
+        return connection;
+      }
+    }
+
+    return null;
+  }
+
+  /// Hit test for a port at the given graph position.
+  ///
+  /// Returns a record containing (nodeId, portId, isOutput) if a port is found
+  /// at the position, otherwise returns null.
+  ///
+  /// This is useful for finding target ports during connection drag operations.
+  ///
+  /// Example:
+  /// ```dart
+  /// final result = controller.hitTestPort(graphPosition);
+  /// if (result != null) {
+  ///   print('Found port ${result.portId} on node ${result.nodeId}');
+  /// }
+  /// ```
+  ({String nodeId, String portId, bool isOutput})? hitTestPort(
+    Offset graphPosition,
+  ) {
+    final result = _spatialIndex.hitTestPort(graphPosition);
+    if (result != null && result.portId != null) {
+      return (
+        nodeId: result.nodeId!,
+        portId: result.portId!,
+        isOutput: result.isOutput ?? false,
+      );
+    }
+    return null;
+  }
+
+  // ============================================================================
+  // Layout Operations
+  // ============================================================================
+
+  /// Arranges all nodes in a grid layout.
+  ///
+  /// Calculates an optimal grid size based on the square root of the number of nodes
+  /// and positions them in rows and columns with the specified spacing.
+  ///
+  /// Parameters:
+  /// - [spacing]: The distance between nodes in pixels (default: 150.0)
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.arrangeNodesInGrid(spacing: 200.0);
+  /// ```
+  void arrangeNodesInGrid({double spacing = 150.0}) {
+    final nodeList = _nodes.values.toList();
+    final gridSize = math.sqrt(nodeList.length.toDouble()).ceil();
+
+    runInAction(() {
+      for (int i = 0; i < nodeList.length; i++) {
+        final row = i ~/ gridSize;
+        final col = i % gridSize;
+        final newPosition = Offset(col * spacing, row * spacing);
+        nodeList[i].position.value = newPosition;
+        // Update visual position with snapping
+        nodeList[i].setVisualPosition(snapToGrid(newPosition));
+      }
+    });
+
+    // Rebuild spatial index for all nodes and connections after layout
+    _spatialIndex.rebuildFromNodes(nodeList);
+    rebuildAllConnectionSegments();
+  }
+
+  /// Arranges nodes hierarchically by type.
+  ///
+  /// Groups nodes by their type property and arranges each type group in rows,
+  /// with 200 pixels horizontal spacing and 150 pixels vertical spacing between groups.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.arrangeNodesHierarchically();
+  /// ```
+  void arrangeNodesHierarchically() {
+    // Simple implementation - arrange by type
+    final nodesByType = <String, List<Node<T>>>{};
+    for (final node in _nodes.values) {
+      nodesByType.putIfAbsent(node.type, () => []).add(node);
+    }
+
+    runInAction(() {
+      double y = 0;
+      for (final entry in nodesByType.entries) {
+        double x = 0;
+        for (final node in entry.value) {
+          final newPosition = Offset(x, y);
+          node.position.value = newPosition;
+          // Update visual position with snapping
+          node.setVisualPosition(snapToGrid(newPosition));
+          x += 200;
+        }
+        y += 150;
+      }
+    });
+
+    // Rebuild spatial index for all nodes and connections after layout
+    _spatialIndex.rebuildFromNodes(_nodes.values);
+    rebuildAllConnectionSegments();
+  }
+
+  // ============================================================================
+  // Batch Selection Operations
+  // ============================================================================
+
+  /// Clears all selections (nodes and connections) and exits any active
+  /// editing mode.
+  ///
+  /// This is a convenience method that calls `clearNodeSelection` and
+  /// `clearConnectionSelection`, and also clears any inline editing state
+  /// on nodes like CommentNode.
+  void clearSelection() {
+    runInAction(() {
+      // Clear any inline editing state on nodes
+      for (final node in _nodes.values) {
+        if (node.isEditing) {
+          node.isEditing = false;
+        }
+      }
+
+      // Only clear selections if something is selected
+      if (_selectedNodeIds.isNotEmpty || _selectedConnectionIds.isNotEmpty) {
+        clearNodeSelection();
+        clearConnectionSelection();
+      }
+    });
+  }
+
+  /// Selects all selectable nodes in the graph.
+  ///
+  /// Only nodes with `selectable: true` are included.
+  ///
+  /// This is a convenience method for selecting everything. Use Cmd+A / Ctrl+A
+  /// keyboard shortcut to trigger this.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.selectAllNodes();
+  /// ```
+  void selectAllNodes() {
+    runInAction(() {
+      _selectedNodeIds.clear();
+      for (final node in _nodes.values) {
+        if (node.selectable) {
+          _selectedNodeIds.add(node.id);
+          node.selected.value = true;
+        }
+      }
+    });
+  }
+
+  /// Selects all connections in the graph.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.selectAllConnections();
+  /// ```
+  void selectAllConnections() {
+    runInAction(() {
+      _selectedConnectionIds.clear();
+      _selectedConnectionIds.addAll(_connections.map((c) => c.id));
+    });
+  }
+
+  /// Selects all nodes of a specific type.
+  ///
+  /// This clears the current selection and selects only nodes matching the given type.
+  ///
+  /// Parameters:
+  /// - [type]: The node type to select (matches the `node.type` property)
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.selectNodesByType('process');
+  /// ```
+  void selectNodesByType(String type) {
+    runInAction(() {
+      for (final node in _nodes.values) {
+        node.selected.value = false;
+      }
+      _selectedNodeIds.clear();
+
+      for (final node in _nodes.values) {
+        if (node.type == type) {
+          _selectedNodeIds.add(node.id);
+          node.selected.value = true;
+        }
+      }
+    });
+  }
+
+  /// Deletes all selected nodes and connections with lock check and confirmation.
+  ///
+  /// This async method processes all selected items, respecting:
+  /// - Behavior mode (must allow deletion)
+  /// - Lock status (locked items are skipped)
+  /// - Before-delete callbacks (if provided, allows confirmation dialogs)
+  ///
+  /// Items are processed sequentially to allow for individual confirmation dialogs.
+  /// If a callback returns false for an item, that item is skipped but processing
+  /// continues for remaining items.
+  ///
+  /// Example:
+  /// ```dart
+  /// await controller.deleteSelectedWithConfirmation();
+  /// ```
+  Future<void> deleteSelectedWithConfirmation() async {
+    // Check behavior first
+    if (!behavior.canDelete) return;
+
+    // Process nodes
+    final nodeIds = selectedNodeIds.toList();
+    for (final nodeId in nodeIds) {
+      await requestDeleteNode(nodeId);
+    }
+
+    // Process connections
+    final connectionIds = selectedConnectionIds.toList();
+    for (final connectionId in connectionIds) {
+      await requestDeleteConnection(connectionId);
+    }
+  }
+
+  /// Inverts the current node selection.
+  ///
+  /// All currently selected nodes become deselected, and all deselected nodes
+  /// become selected.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.invertSelection();
+  /// ```
+  void invertSelection() {
+    runInAction(() {
+      final currentlySelected = Set.from(_selectedNodeIds);
+      _selectedNodeIds.clear();
+
+      for (final node in _nodes.values) {
+        if (currentlySelected.contains(node.id)) {
+          node.selected.value = false;
+        } else {
+          _selectedNodeIds.add(node.id);
+          node.selected.value = true;
+        }
+      }
+    });
+  }
+
+  /// Selects only the specified nodes, clearing any existing selection.
+  ///
+  /// This is similar to `selectNodes` but always clears the existing selection first.
+  ///
+  /// Parameters:
+  /// - [nodeIds]: List of node IDs to select
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.selectSpecificNodes(['node1', 'node2']);
+  /// ```
+  void selectSpecificNodes(List<String> nodeIds) {
+    runInAction(() {
+      // Clear current selection
+      for (final node in _nodes.values) {
+        node.selected.value = false;
+      }
+      _selectedNodeIds.clear();
+
+      // Select specified nodes
+      for (final nodeId in nodeIds) {
+        final node = _nodes[nodeId];
+        if (node != null) {
+          _selectedNodeIds.add(nodeId);
+          node.selected.value = true;
+        }
+      }
+    });
+  }
+
+  // ============================================================================
+  // Editor Initialization
+  // ============================================================================
+  //
+  // NOTE: The canonical initialization entry point is _initController() in
+  // editor_init_api.dart. That method is private and can only be called by
+  // NodeFlowEditor during its initState(). All initialization-related logic
+  // is centralized there.
+  //
+  // Post-initialization updates (theme, events, nodeShapeBuilder) are also
+  // handled via private methods in editor_init_api.dart:
+  // - _updateTheme()
+  // - _updateEvents()
+  // - _updateNodeShapeBuilder()
+  //
+  // ============================================================================
+
+  // ============================================================================
+  // Computed Properties
+  // ============================================================================
+
+  /// Gets the bounding rectangle that encompasses all nodes in the graph.
+  ///
+  /// Calculates the minimal rectangle that contains all nodes based on their
+  /// positions and sizes.
+  ///
+  /// Returns `Rect.zero` if there are no nodes.
+  ///
+  /// Example:
+  /// ```dart
+  /// final bounds = controller.nodesBounds;
+  /// print('Graph size: ${bounds.width} x ${bounds.height}');
+  /// ```
+  Rect get nodesBounds => _nodesBounds.value;
+}

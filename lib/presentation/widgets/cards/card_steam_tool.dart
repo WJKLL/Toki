@@ -1,7 +1,8 @@
 // === 文件: lib/presentation/widgets/cards/card_steam_tool.dart ===
 // 编号：C-37 工具启动卡（v1.34.0 新增;v1.35.0 泛化 ToolConfig 分发）
 // 说明：首页网格动态工具卡(1×1,样式对齐 C-33 倒计时小卡 —— MiuixCard
-//   主题表面 + squircle 圆角,阴影由 C-34 槽位 CardShadow 提供):
+//   主题表面 + squircle 圆角;阴影与暗色高光由 C-34 槽位统一提供
+//   (CardShadow + CardDarkGlow, v1.44.x 起),本组件保持纯展示):
 //   - 内容:徽标(ToolBrandIcon:C-38 泛化)+ 工具名 + 一句说明;
 //     点击 → 工具派生 route(customRoute 或 /tool/:id);
 //   - 移除交互(v1.34.2):由 C-34 编辑态统一承担 —— 本组件保持纯展示;
@@ -12,7 +13,6 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/tools/tool_catalog_store.dart';
-import '../../../core/widgets/card_dark_glow.dart';
 import '../../../core/widgets/tool_brand_icon.dart';
 import '../../../domain/entities/home_card.dart';
 import '../../../domain/entities/tool_config.dart';
@@ -29,46 +29,43 @@ class C37SteamToolCard extends StatelessWidget {
     if (item == null) return const SizedBox.shrink(); // 防御(下架滤除)。
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
-    return CardDarkGlow(
-      radius: 16,
-      child: MiuixCard(
-        onPressed: () => context.push(item.route),
-        insideMargin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            ToolBrandIcon(
-              tool: item,
-              size: 26,
-              tint: colors.onSurfaceContainer,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  MiuixText(
-                    item.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: textStyles.body2.copyWith(
-                      color: colors.onSurfaceContainer,
-                      fontWeight: FontWeight.w600,
-                    ),
+    return MiuixCard(
+      onPressed: () => context.push(item.route),
+      insideMargin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          ToolBrandIcon(
+            tool: item,
+            size: 26,
+            tint: colors.onSurfaceContainer,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                MiuixText(
+                  item.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: textStyles.body2.copyWith(
+                    color: colors.onSurfaceContainer,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 2),
-                  MiuixText(
-                    item.summary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    fontSize: 11,
-                    color: colors.onSurfaceVariantSummary,
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 2),
+                MiuixText(
+                  item.summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  fontSize: 11,
+                  color: colors.onSurfaceVariantSummary,
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

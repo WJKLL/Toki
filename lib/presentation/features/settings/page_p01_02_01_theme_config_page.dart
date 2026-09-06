@@ -1,5 +1,6 @@
 // lib/presentation/features/settings/page_p01_02_01_theme_config_page.dart
 // 编号：P-01-02-01 主题与色彩配置页（F-08 主题与 Monet 模块 / §10）
+// v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
 // 配置项：深色模式（S-01 状态机）· Monet 开关 · keyColor 种子色 · PaletteStyle
 // 🔧 修改（v1.4.3 / T24）：接入 C-23 内容推动折叠标题栏（push 型二级页，
 //   leading 为返回胶囊按钮），顶栏为 CustomScrollView 首个 sliver。
@@ -17,7 +18,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/u02_color_utils.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/c05_warning_card.dart';
@@ -25,8 +25,6 @@ import '../../../domain/entities/app_settings.dart';
 import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
 
@@ -67,30 +65,10 @@ class _PageP010201ThemeConfigPageState
     onTap: () => Navigator.of(context).maybePop(),
   );
 
-  // ── C-25（v1.12.3）：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  /// 页面级顶部快照（U-03 门控创建/释放；null = 降级纯 surface）。
-  MiuixLayerBackdrop? _topBackdrop;
-
+  // ── C-25（v1.12.3）：折叠滚动行为（v1.42.0 起纯折叠，无快照采样）──
   /// 顶部折叠滚动行为（MiuixTopAppBar + MiuixScrollBehaviorListener 联动）。
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
-
-  /// U-03 裁决创建/释放顶部快照（build 中调用，幂等）。
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    // ⚡ 功耗优化：顶部快照释放。
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,13 +87,6 @@ class _PageP010201ThemeConfigPageState
 
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
     final MiuixColors colors = MiuixTheme.of(context).colors;
-    // v1.12.3（C-25）：顶部毛玻璃 U-03 裁决 + 快照幂等同步。
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: settings.blurEnabled,
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
 
     // 🔧 修复（v1.0.6）：交互型页面不得整体 TickerMode(false)——否则 MiuixSwitch
     //   圆点动画与 MiuixTabRow 指示器被静音冻结（"功能生效但视觉不变"根因）。
@@ -126,12 +97,11 @@ class _PageP010201ThemeConfigPageState
         title: '主题与色彩',
         largeTitle: '主题与色彩',
         navigationIcon: _backButton, // 左 1 按钮（返回）
-        actions: <Widget>[
+        actions: const <Widget>[
           // v1.13.0（C-26）：顶部更多菜单。
-          C26MoreMenu(backdrop: _topBackdrop),
+          C26MoreMenu(),
         ],
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         // v1.12.3：内容避让顶栏；快照画 surface 底色 + 采样 6 帧。
@@ -244,12 +214,6 @@ class _PageP010201ThemeConfigPageState
           color: colors.surface,
           child: list,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : list;
         return Material(
           type: MaterialType.transparency,
           // 🔧 v1.0.7（布局稳定性）：Column + MainAxisAlignment.start 强制顶格。
@@ -261,7 +225,7 @@ class _PageP010201ThemeConfigPageState
                 // v1.12.3：MiuixScrollBehaviorListener 桥接滚动折叠。
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
             ],

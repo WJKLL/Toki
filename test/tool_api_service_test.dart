@@ -4,6 +4,7 @@
 //  错误分类（服务端 message 覆盖）、requiresAuth 无 key → needsKey。
 //  MockClient fixture（http/testing），零真实网络。
 import 'dart:convert';
+import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -52,7 +53,7 @@ ToolApiService serviceCapturing(
 }
 
 void main() {
-  test('GET：query 参数组装 + key 附加 + json 解析', () async {
+  test('GET：query 参数组装 + key 走 Bearer 头(v1.42.0) + json 解析', () async {
     late http.Request seen;
     final ToolApiService s = serviceCapturing((req) => seen = req);
     final ToolApiResult r = await s.call(
@@ -68,8 +69,21 @@ void main() {
     expect(seen.method, 'GET');
     expect(seen.url.path, '/api/v1/random/string');
     expect(seen.url.queryParameters['length'], '8');
-    expect(seen.url.queryParameters['key'], 'secret'); // key 走 query。
+    // v1.42.0:key 改走 Authorization: Bearer 头,不再塞 query(实测 query
+    // key 被 UAPI 校验拒绝 → 401,即使匿名可用也被拖垮)。
+    expect(seen.url.queryParameters.containsKey('key'), isFalse);
+    expect(seen.headers['Authorization'], 'Bearer secret');
     expect(r.json, <String, dynamic>{'ok': true});
+  });
+
+  test('无 key → 匿名请求,不带 Authorization 头(v1.42.0)', () async {
+    late http.Request seen;
+    final ToolApiService s = serviceCapturing((req) => seen = req);
+    await s.call(
+      tool: _tool(apiPath: '/api/v1/random/string'),
+      values: const <String, String>{},
+    );
+    expect(seen.headers.containsKey('Authorization'), isFalse);
   });
 
   test('POST：JSON body + 字段名透传（base64 encode）', () async {
@@ -187,4 +201,55 @@ void main() {
       expect(e.error, ToolApiError.needsKey);
     }
   });
+
+  test('file 参数 → multipart/form-data 上传 + query 携带(v1.41.0)', () async {
+    // MockClient 内部按 utf8 解码 body，无法承载 multipart 二进制 →
+    // 用自定义 BaseClient 捕获 finalize 后的原始字节流。
+    final _CaptureClient capture = _CaptureClient();
+    final ToolApiService s = ToolApiService(client: capture);
+    final ToolApiResult r = await s.call(
+      tool: _tool(
+        method: 'POST',
+        apiPath: '/api/v1/image/compress',
+        params: const <ToolParam>[
+          ToolParam(name: 'file', label: '图片', type: ToolParamType.file),
+          ToolParam(name: 'level', label: '级别', inQuery: true),
+        ],
+      ),
+      values: const <String, String>{'level': '3'},
+      files: <String, Uint8List>{
+        'file': Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3, 4]),
+      },
+    );
+    expect(capture.uri?.queryParameters['level'], '3'); // query 正常携带。
+    expect(capture.contentType, contains('multipart/form-data'));
+    final String raw = String.fromCharCodes(capture.lastBody ?? Uint8List(0));
+    expect(raw, contains('name="file"')); // 文件 part 字段名。
+    expect(raw, contains('toki_file.png')); // PNG 魔数 → 补扩展名。
+    expect(r.json, isNotNull);
+  });
+}
+
+/// 捕获 multipart 原始字节的自定义客户端（MockClient 无法承载二进制）。
+class _CaptureClient extends http.BaseClient {
+  Uri? uri;
+  String? contentType;
+  Uint8List? lastBody;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    uri = request.url;
+    final http.ByteStream bs = request.finalize(); // 生成 boundary/头(同步)。
+    contentType = request.headers['content-type'];
+    lastBody = await bs.toBytes();
+    return http.StreamedResponse(
+      Stream<List<int>>.fromIterable(
+        <List<int>>[utf8.encode('{"ok":true}')],
+      ),
+      200,
+      headers: <String, String>{
+        'content-type': 'application/json; charset=utf-8',
+      },
+    );
+  }
 }

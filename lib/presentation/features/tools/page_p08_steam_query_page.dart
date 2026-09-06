@@ -24,18 +24,14 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/tools/steam_api_service.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../../core/widgets/steam_logo_icon.dart';
 import '../../../domain/entities/steam_user.dart';
-import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../providers/steam_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c39_steam_key_sheet.dart';
@@ -76,24 +72,13 @@ class _PageP08SteamQueryPageState extends ConsumerState<PageP08SteamQueryPage> {
   String? _errorText;
   bool _keySheet = false;
 
-  // ── C-25:顶部毛玻璃快照源 + 折叠滚动行为 ──
-  MiuixLayerBackdrop? _topBackdrop;
+  // ── C-25:顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无页面级快照采样)──
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
-
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
 
   @override
   void dispose() {
     _input.dispose();
-    _topBackdrop?.dispose();
     super.dispose();
   }
 
@@ -148,13 +133,6 @@ class _PageP08SteamQueryPageState extends ConsumerState<PageP08SteamQueryPage> {
   @override
   Widget build(BuildContext context) {
     final MiuixColors colors = MiuixTheme.of(context).colors;
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled
         ? C22ContentThroughFloatingBottomBar.contentBottomInset(context)
@@ -167,7 +145,6 @@ class _PageP08SteamQueryPageState extends ConsumerState<PageP08SteamQueryPage> {
         largeTitle: 'Steam 用户',
         navigationIcon: _backButton,
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         // 宽屏内容居中(maxWidth 约束,与全 App 响应式语言一致)。
@@ -189,16 +166,11 @@ class _PageP08SteamQueryPageState extends ConsumerState<PageP08SteamQueryPage> {
             ),
           ),
         );
+        // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget listWithBg = ColoredBox(
           color: colors.surface,
           child: page,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : listWithBg;
         return Material(
           type: MaterialType.transparency,
           child: Column(
@@ -208,7 +180,7 @@ class _PageP08SteamQueryPageState extends ConsumerState<PageP08SteamQueryPage> {
               Expanded(
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
               // 凭证弹层(C-39;show 布尔驱动,false 零开销)。

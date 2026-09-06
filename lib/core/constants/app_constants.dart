@@ -12,8 +12,8 @@ abstract final class AppConstants {
   /// 应用版本（与 pubspec version 同步，S-04 平台信息服务读取）。
   /// v1.34.0:同步为当前发布版本(此前长期滞留 1.17.4,关于页/日志失真)。
   /// v1.39.0:buildNumber 改为与 pubspec +N 同步(此前滞留致关于页版本失真)。
-  static const String appVersion = '1.40.0';
-  static const String buildNumber = '133';
+  static const String appVersion = '1.49.0';
+  static const String buildNumber = '152';
 
   /// UAPI 接口平台 base（v1.35.0：通用工具 apiPath 统一前缀）。
   static const String uapiBaseUrl = 'https://uapis.cn';

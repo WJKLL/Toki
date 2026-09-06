@@ -28,13 +28,16 @@ import 'data/repositories/agreement_repository_impl.dart';
 import 'data/repositories/course_repository_impl.dart';
 import 'data/repositories/daily_activity_repository_impl.dart';
 import 'data/repositories/settings_repository_impl.dart';
+import 'data/repositories/todo_repository_impl.dart';
 import 'domain/entities/app_settings.dart';
 import 'presentation/providers/agreement_provider.dart';
 import 'presentation/providers/course_provider.dart';
 import 'presentation/providers/daily_activity_provider.dart';
 import 'presentation/providers/scroll_activity_provider.dart';
 import 'presentation/providers/settings_providers.dart';
+import 'presentation/providers/todo_providers.dart';
 import 'presentation/router/app_router.dart';
+import 'presentation/widgets/c50_splash_gate.dart';
 import 'presentation/widgets/course_reminder_bridge.dart';
 
 Future<void> main() async {
@@ -51,6 +54,8 @@ Future<void> main() async {
   final AgreementRepositoryImpl agreementRepository = AgreementRepositoryImpl(
     prefs,
   );
+  // v1.43.0（S-23）：待办/回收站仓储（与设置共用 prefs 实例）。
+  final TodoRepositoryImpl todoRepository = TodoRepositoryImpl(prefs);
 
   // 🐛 修复（BUG-001 / T12）：UI 首帧前一次性探测真实 Android API Level
   //   （澎湃OS 4 / Android 17 误识别为 12 的修正），结果缓存于 U-04；
@@ -92,6 +97,11 @@ Future<void> main() async {
     ToolCatalogStore.instance.seedFallback();
   }
 
+  // v1.44.0(C-50 试验):开屏 Gate —— 品牌淡入期间底层真实渲染首页,
+  // 预热 Impeller shader/pipeline(治冷启动掉帧);widget 测试不跑 main,
+  // 故此处显式开启,测试链路不受影响。
+  C50SplashGate.enabled = true;
+
   runZonedGuarded(
     () => runApp(
       ProviderScope(
@@ -105,6 +115,8 @@ Future<void> main() async {
           ),
           // v1.20.0（S-20）：用户协议状态仓储注入。
           agreementRepositoryProvider.overrideWithValue(agreementRepository),
+          // v1.43.0（S-23）：待办/回收站仓储注入。
+          todoRepositoryProvider.overrideWithValue(todoRepository),
         ],
         child: const XiangJuGongApp(),
       ),
@@ -217,7 +229,9 @@ class XiangJuGongApp extends ConsumerWidget {
                       // v1.36.0：课程提醒常驻桥（课表→到点闹钟 / 上课→常驻通知；
                       //   Android 生效，Web 空转透传）。
                       child: CourseReminderBridge(
-                        child: child ?? const SizedBox.shrink(),
+                        child: C50SplashGate(
+                          child: child ?? const SizedBox.shrink(),
+                        ),
                       ),
                     ),
                   ),

@@ -15,7 +15,7 @@
 //   - C-12 悬浮底栏 RepaintBoundary 隔离（§11.2.3）；T50 快照心跳仅悬浮模式
 //     挂载（v1.10.21 起需毛玻璃开关同开；v1.10.25 起为被动帧回调、无 Ticker，
 //     静止零帧请求 → 适配系统自适应刷新率；采样率 3 帧/次）。
-import 'dart:async' show unawaited;
+import 'dart:async';
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/widgets.dart';
@@ -23,6 +23,7 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/lifecycle/app_lifecycle_controller.dart';
 import '../../core/logging/app_log_service.dart';
 import '../../core/refresh_rate/refresh_rate_controller.dart';
 import '../../core/utils/u03_blur_policy.dart';
@@ -31,6 +32,7 @@ import '../../core/widgets/app_icons.dart';
 import '../../core/widgets/c15_page_scale_container.dart';
 import '../../domain/entities/app_settings.dart';
 import '../features/home/page_p01_01_home_page.dart';
+import '../features/todo/page_p10_todo_page.dart';
 import '../features/tools/page_p01_04_tools_page.dart';
 import '../providers/blur_degrade_provider.dart';
 import '../providers/drag_active_provider.dart';
@@ -63,10 +65,19 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   /// 深链首次同步标志：didChangeDependencies 后一次性把 PageView 跳到 URL 页。
   bool _pageSynced = false;
 
+  /// v1.49.0:路由实例(运行中外部跳页监听,dispose 解绑)。
+  GoRouter? _router;
+
   /// 当前页索引（State 字段，显式 setState 管理）。v1.10.1 修复：不可依赖
   ///   GoRouterState.of(context) 的隐式重建 —— query 变化（/?page=N）不会重建
   ///   const MainShellPage，导致 currentIndex 冻结、指示器 didUpdateWidget 不触发。
   int _currentIndex = 0;
+
+  // ── v1.43.0：窄/宽布局切换校正 ──
+  /// 上次布局分支（窄屏底栏 / 宽屏侧栏）。切换会重建 PageView（树结构不同），
+  /// 新 ScrollPosition 落回 initialPage 0（待办）→ 帧后跳回用户所在页。
+  bool? _lastWide;
+  bool _needsPageResync = false;
 
   /// v1.10.31：程序化翻页动画进行中标志 —— animateToPage 跨页会经过中间页
   ///   触发 onPageChanged，若不忽略，中间页会覆盖 currentIndex → 指示器
@@ -124,15 +135,82 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     WidgetsBinding.instance.addObserver(this);
   }
 
+  // ── v1.44.x（S-24）：后台最小化 —— 15s 复位 + resume 按时间戳补判 ──
+  /// 进入后台时刻（null = 前台）。
+  DateTime? _bgAt;
+
+  /// 本次后台期是否已执行过复位（幂等：单后台期只复位一次）。
+  bool _bgResetDone = false;
+
+  /// 后台 15s 提前复位计时（引擎冻结时不触发 → resume 按时间戳补判）。
+  Timer? _bgResetTimer;
+
+  /// S-24 后台复位：广播收拢浮层（pop 前，编辑器先落盘）→ pop 二级页 →
+  /// 回默认首页（page=1，与冷启动一致）。只保留必要状态，开屏重播由
+  /// C-50 订阅 S-24 处理。
+  void _performBgReset() {
+    if (!mounted || _bgResetDone) return;
+    _bgResetDone = true;
+    _bgResetTimer?.cancel();
+    // 1) 广播复位：浮层收拢、P-11 编辑器立即落盘（须在 pop 前，页面仍挂树）。
+    AppLifecycleController.instance.notifyReset();
+    // 2) 收起全部二级页（流程图编辑器/回收站/设置/工具…），回到 shell 根。
+    final NavigatorState? nav = Navigator.maybeOf(context);
+    nav?.popUntil((Route<dynamic> r) => r.isFirst);
+    // 3) 回默认首页 tab（page=1；jumpToPage 无中间页动画，指示器直落位）。
+    if (_currentIndex != 1) {
+      setState(() => _currentIndex = 1);
+      if (_pageController.hasClients) _pageController.jumpToPage(1);
+      context.go('/?page=1');
+    }
+    AppLogService.instance.info('lifecycle', '后台≥15s 复位完成(回首页)');
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // v1.10.3：前后台切换日志（开关关闭时零成本）。
     AppLogService.instance.info('lifecycle', '应用状态: $state');
+    // v1.44.x（S-24 后台最小化）：
+    //   - paused：记后台时刻，15s 计时（引擎存活 → 后台提前复位收拢）；
+    //   - resumed：取消计时；若本次后台期 ≥15s 且未复位（引擎被冻结、
+    //     计时未触发）→ 此刻补判复位。C-50 收到 S-24 广播后在 resume 态
+    //     立即重播开屏，呈现「像新开但秒开」的原生体验。
+    switch (state) {
+      case AppLifecycleState.paused:
+        _bgAt = DateTime.now();
+        _bgResetDone = false;
+        _bgResetTimer?.cancel();
+        _bgResetTimer = Timer(const Duration(seconds: 15), () {
+          if (!mounted || _bgAt == null) return;
+          _performBgReset();
+        });
+        break;
+      case AppLifecycleState.resumed:
+        _bgResetTimer?.cancel();
+        final DateTime? at = _bgAt;
+        _bgAt = null;
+        if (at != null &&
+            !_bgResetDone &&
+            DateTime.now().difference(at) >= const Duration(seconds: 15)) {
+          _performBgReset();
+        }
+        break;
+      default:
+        break;
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // v1.49.0:运行中响应外部 go('/?page=N')(如首页 C-29 待办卡点击跳待办页)。
+    //   URL query「page」为单一事实源 —— 内部翻页(_onDestinationSelected/
+    //   onPageChanged)已 setState+go,listener 幂等跳过;外部 go 在此同步。
+    final GoRouter router = GoRouter.of(context);
+    if (!identical(router, _router)) {
+      _router?.routerDelegate.removeListener(_onExternalPageChange);
+      _router = router;
+      router.routerDelegate.addListener(_onExternalPageChange);
+    }
     // 深链首帧：URL ?page=N → 初始化 _currentIndex 并把 PageView 跳到该页。
     if (!_pageSynced) {
       _pageSynced = true;
@@ -146,10 +224,28 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     }
   }
 
+  /// v1.49.0:外部跳页同步(无动画 jump,防与手势/指示器动画竞争;
+  /// S-24 复位 jump 同先例)。
+  void _onExternalPageChange() {
+    final GoRouter? router = _router;
+    if (router == null || !mounted) return;
+    final String? page = router.state.uri.queryParameters['page'];
+    final int? raw = int.tryParse(page ?? '');
+    if (raw == null) return;
+    final int maxPage = ref.read(bottomBarItemsProvider).length - 1;
+    final int idx = raw.clamp(0, maxPage);
+    if (idx == _currentIndex) return;
+    setState(() => _currentIndex = idx);
+    _pageController.jumpToPage(idx);
+  }
+
   @override
   void dispose() {
     // ⚡ 功耗优化：导航状态必须释放，防止状态泄漏。
+    _router?.routerDelegate.removeListener(_onExternalPageChange);
+    _router = null;
     WidgetsBinding.instance.removeObserver(this);
+    _bgResetTimer?.cancel(); // S-24：后台复位计时兜底释放。
     _pageController.dispose();
     _railState.dispose();
     // T50：页面级 backdrop 释放（悬浮模式关闭时已置 null，此处兜底）。
@@ -217,6 +313,22 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     final bool isWide = U04PlatformUtils.isWideScreen(
       MediaQuery.sizeOf(context).width,
     );
+    // v1.43.0：窄/宽分支切换 → PageView 重建落回 initialPage → 帧后校正回
+    //   当前页（旋转后用户不应被丢回待办/首页另一页）。
+    if (_lastWide != null && isWide != _lastWide) {
+      _needsPageResync = true;
+    }
+    _lastWide = isWide;
+    if (_needsPageResync) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_pageController.hasClients) return;
+        _needsPageResync = false;
+        final double? p = _pageController.page;
+        if (p != null && p.round() != _currentIndex) {
+          _pageController.jumpToPage(_currentIndex);
+        }
+      });
+    }
     final int currentIndex = _currentIndex; // State 字段（v1.10.1 显式管理）
     // v1.13.0：底栏项 / PageView 页数同源（bottomBarItemsProvider，动态 2→N）。
     final List<C22BarItemData> items = ref.watch(bottomBarItemsProvider);
@@ -239,7 +351,9 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
         ? 1.0
         : settings.pageScale;
 
-    // T64：一级页面 PageView（页数与底栏项同源，当前首页/工具集）。
+    // T64：一级页面 PageView（页数与底栏项同源：待办/首页/工具）。
+    // v1.43.0(P-10)：待办加在首页左边(index 0)；默认启动仍落首页(page=1,
+    //   由 initialLocation /?page=1 保证,见 app_router)。
     //   PageView 内建横滑手势；onPageChanged 仅在翻页完成后触发（离散联动）。
     final Widget content = C15PageScaleContainer(
       scale: pageScale, // ⚡ 功耗优化：1.0 时直通零开销
@@ -252,7 +366,11 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
         // v1.18.x（T1）：切页按下即跟手（DragStartBehavior.down）。
         dragStartBehavior: DragStartBehavior.down,
         onPageChanged: _onPageChanged,
-        children: const <Widget>[PageP0101HomePage(), PageP0104ToolsPage()],
+        children: const <Widget>[
+          PageP10TodoPage(),
+          PageP0101HomePage(),
+          PageP0104ToolsPage(),
+        ],
       ),
     );
 

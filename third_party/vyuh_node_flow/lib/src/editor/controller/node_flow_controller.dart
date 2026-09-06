@@ -1,0 +1,1294 @@
+import 'dart:collection';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
+import 'package:flutter/material.dart';
+import 'package:mobx/mobx.dart';
+
+import '../../connections/connection.dart';
+import '../../connections/connection_painter.dart';
+import '../../connections/connection_path_cache.dart';
+import '../../connections/connection_validation.dart';
+import '../../connections/temporary_connection.dart';
+import '../../graph/coordinates.dart';
+import '../../graph/graph.dart';
+import '../../graph/viewport.dart';
+import '../../nodes/comment_node.dart';
+import '../../nodes/group_node.dart';
+import '../../nodes/interaction_state.dart';
+import '../../nodes/mixins/groupable_mixin.dart';
+import '../../nodes/mixins/resizable_mixin.dart';
+import '../../nodes/node.dart';
+import '../../nodes/node_data.dart';
+import '../../nodes/node_shape.dart';
+import '../../plugins/debug/debug_plugin.dart';
+import '../../plugins/events/events.dart';
+import '../../plugins/node_flow_plugin.dart';
+import '../../plugins/snap/snap_plugin.dart';
+import '../../ports/port.dart';
+import '../../shared/spatial/graph_spatial_index.dart';
+import '../drag_session.dart';
+import '../keyboard/node_flow_actions.dart';
+import '../node_flow_behavior.dart';
+import '../node_flow_config.dart';
+import '../node_flow_events.dart';
+import '../resizer_widget.dart';
+import '../scene/graph_scene.dart';
+import '../snap_delegate.dart';
+import '../themes/node_flow_theme.dart';
+import '../viewport_animation_mixin.dart';
+
+part 'connection_api.dart';
+part 'dirty_tracking_api.dart';
+part 'editor_init_api.dart';
+part 'graph_api.dart';
+part 'group_api.dart';
+part 'node_api.dart';
+part 'node_flow_controller_api.dart';
+part 'resize_api.dart';
+part 'scene_projection_api.dart';
+part 'viewport_api.dart';
+
+/// Alignment options for node alignment operations
+enum NodeAlignment {
+  top,
+  right,
+  bottom,
+  left,
+  center,
+  horizontalCenter,
+  verticalCenter,
+}
+
+/// High-performance controller for node flow state management.
+///
+/// This is the main controller for managing nodes, connections, viewport,
+/// and interactions in a node flow editor. It uses MobX for reactive state management.
+///
+/// ## Type Parameters
+/// - `T`: The data type stored in each node
+/// - `C`: The data type stored in each connection (defaults to `void` for untyped connections)
+///
+/// ## Example
+/// ```dart
+/// // Untyped connections (default)
+/// final controller = NodeFlowController<MyNodeData>();
+///
+/// // Typed connections with a sealed class
+/// sealed class EdgeData {}
+/// class HighPriority extends EdgeData {}
+/// class Normal extends EdgeData {}
+///
+/// final controller = NodeFlowController<MyNodeData, EdgeData>(
+///   connections: [
+///     Connection<EdgeData>(
+///       id: 'conn-1',
+///       sourceNodeId: 'a',
+///       sourcePortId: 'out',
+///       targetNodeId: 'b',
+///       targetPortId: 'in',
+///       data: HighPriority(),
+///     ),
+///   ],
+/// );
+/// ```
+class NodeFlowController<T, C> {
+  /// Creates a new node flow controller.
+  ///
+  /// Parameters:
+  /// * [initialViewport] - Initial viewport position and zoom (defaults to origin at 1x zoom)
+  /// * [config] - Configuration settings for behavior like snap-to-grid, zoom limits, etc.
+  /// * [nodes] - Optional initial nodes to populate the graph with
+  /// * [connections] - Optional initial connections between nodes
+  ///
+  /// Example:
+  /// ```dart
+  /// // Create an empty controller
+  /// final controller = NodeFlowController<MyData>();
+  ///
+  /// // Create a pre-populated controller
+  /// final controller = NodeFlowController<MyData>(
+  ///   nodes: [node1, node2, node3],
+  ///   connections: [conn1, conn2],
+  ///   initialViewport: GraphViewport(x: 0, y: 0, zoom: 1.0),
+  /// );
+  /// ```
+  NodeFlowController({
+    GraphViewport? initialViewport,
+    NodeFlowConfig? config,
+    List<Node<T>>? nodes,
+    List<Connection<C>>? connections,
+  }) : _viewport = Observable(
+         initialViewport ?? const GraphViewport(x: 0, y: 0, zoom: 1.0),
+       ),
+       _config = config ?? NodeFlowConfig.defaultConfig {
+    // Initialize actions and shortcuts system
+    shortcuts = NodeFlowShortcutManager<T>();
+    shortcuts.registerActions(DefaultNodeFlowActions.createDefaultActions<T>());
+
+    // Setup node monitoring reactions (for GroupNode tracking)
+    _setupNodeMonitoringReactions();
+
+    // Setup selection change reactions
+    _setupSelectionReactions();
+
+    // NOTE: Spatial index reactions are NOT set up here.
+    // They are deferred to _initController() because the spatial index requires
+    // callbacks (portSizeResolver, nodeShapeBuilder) that are set by the
+    // editor widget. If reactions fire before callbacks are set, ports
+    // will be indexed with incorrect bounds causing hit testing to fail.
+    //
+    // The canonical initialization point is _initController() in editor_init_api.dart.
+    // That method sets up: theme, node shape builder, spatial index callbacks,
+    // connection painter, hit testers, reactions, and initializes loaded nodes.
+
+    // Load initial nodes and connections if provided
+    if (nodes != null && nodes.isNotEmpty) {
+      _loadInitialGraph(nodes, connections ?? const []);
+    }
+
+    _initializeSceneProjection();
+  }
+
+  /// Loads initial graph data during construction.
+  ///
+  /// This is similar to [loadGraph] but designed for constructor use.
+  /// Infrastructure setup is deferred until the theme is set by the editor.
+  void _loadInitialGraph(List<Node<T>> nodes, List<Connection<C>> connections) {
+    runInAction(() {
+      for (final node in nodes) {
+        _nodes[node.id] = node;
+      }
+      _connections.addAll(connections);
+      for (final conn in connections) {
+        _connectionById[conn.id] = conn;
+        _connectionsByNodeId
+            .putIfAbsent(conn.sourceNodeId, () => {})
+            .add(conn.id);
+        _connectionsByNodeId
+            .putIfAbsent(conn.targetNodeId, () => {})
+            .add(conn.id);
+      }
+    });
+
+    // Note: Full infrastructure setup happens when initController is called
+    // by the editor widget, since we need the theme for proper spatial index setup.
+  }
+
+  // Behavioral configuration
+  final NodeFlowConfig _config;
+
+  /// Gets the controller's configuration settings.
+  ///
+  /// The configuration controls behavior like snap-to-grid, zoom limits,
+  /// port snap distance, and other behavioral settings.
+  NodeFlowConfig get config => _config;
+
+  // Theme configuration - observable to enable reactive spatial index updates
+  final Observable<NodeFlowTheme?> _themeObservable =
+      Observable<NodeFlowTheme?>(null);
+
+  /// Gets the current theme configuration.
+  ///
+  /// Returns `null` if no theme has been set. The theme is typically set
+  /// by the editor widget during initialization.
+  NodeFlowTheme? get theme => _themeObservable.value;
+  NodeFlowTheme? get _theme => _themeObservable.value;
+
+  // Node shape builder - determines the shape for each node based on its type/data
+  NodeShape? Function(Node<T> node)? _nodeShapeBuilder;
+
+  /// Gets the node shape builder function.
+  ///
+  /// This function is called to determine the visual shape for each node based
+  /// on its type or data. If `null`, nodes will use the default rectangular shape.
+  NodeShape? Function(Node<T> node)? get nodeShapeBuilder => _nodeShapeBuilder;
+
+  /// Sets the node shape builder function.
+  ///
+  /// This function will be called for each node to determine its visual shape.
+  /// The builder receives the node and should return a [NodeShape] or `null`
+  /// for the default rectangular shape.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.setNodeShapeBuilder((node) {
+  ///   switch (node.type) {
+  ///     case 'Terminal':
+  ///       return CircleShape(fillColor: Colors.blue, strokeColor: Colors.black);
+  ///     case 'Decision':
+  ///       return DiamondShape(fillColor: Colors.yellow, strokeColor: Colors.black);
+  ///     default:
+  ///       return null; // Rectangular node
+  ///   }
+  /// });
+  /// ```
+  void setNodeShapeBuilder(NodeShape? Function(Node<T> node)? builder) {
+    _nodeShapeBuilder = builder;
+
+    // Update the connection painter's node shape getter if it exists
+    // Cast to Node<dynamic> since ConnectionPainter is not generic
+    _connectionPainter?.updateNodeShape(
+      builder != null ? (node) => builder(node as Node<T>) : null,
+    );
+  }
+
+  // Snap delegate for alignment/snap behavior during drag
+  SnapDelegate? _snapDelegate;
+
+  /// Gets the current snap delegate for alignment/snap behavior.
+  ///
+  /// Returns `null` if no snap delegate is set, which means no snapping
+  /// behavior during node drag operations.
+  SnapDelegate? get snapDelegate => _snapDelegate;
+
+  /// Sets the snap delegate for alignment/snap behavior during drag.
+  ///
+  /// The delegate is called during node drag operations to adjust the
+  /// drag delta for snapping to alignment guides or other targets.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.setSnapDelegate(MySnapDelegate());
+  /// ```
+  void setSnapDelegate(SnapDelegate? delegate) {
+    _snapDelegate = delegate;
+  }
+
+  /// Snaps a position to the grid if grid snapping is enabled.
+  ///
+  /// This is a convenience method that accesses the [GridSnapDelegate]
+  /// through the snap delegate chain. Returns the position unchanged if:
+  /// - No snap delegate is set
+  /// - The snap delegate doesn't contain a [GridSnapDelegate]
+  /// - Grid snapping is disabled
+  ///
+  /// Use this for snapping positions when adding nodes, pasting, or other
+  /// programmatic position updates.
+  ///
+  /// Example:
+  /// ```dart
+  /// final snappedPos = controller.snapToGrid(position);
+  /// node.setPosition(snappedPos);
+  /// ```
+  Offset snapToGrid(Offset position) {
+    // First try the attached delegate
+    final delegate = _snapDelegate;
+    if (delegate is SnapPlugin) {
+      // Only snap if plugin is enabled
+      if (!delegate.enabled) return position;
+      return delegate.gridSnapDelegate?.snapPoint(position) ?? position;
+    }
+    if (delegate is GridSnapDelegate) {
+      return delegate.snapPoint(position);
+    }
+
+    // Fall back to plugin registry (for unit tests without initController)
+    final snapExt = _config.pluginRegistry.get<SnapPlugin>();
+    if (snapExt != null) {
+      // Only snap if plugin is enabled
+      if (!snapExt.enabled) return position;
+      return snapExt.gridSnapDelegate?.snapPoint(position) ?? position;
+    }
+
+    return position;
+  }
+
+  // Structured events system
+  NodeFlowEvents<T, C> _events = const NodeFlowEvents();
+
+  /// Gets the current events configuration.
+  ///
+  /// Events are organized into logical groups (node, connection, viewport, etc.)
+  /// for better discoverability and maintainability.
+  NodeFlowEvents<T, C> get events => _events;
+
+  // Canvas focus management
+  final FocusNode _canvasFocusNode = FocusNode(debugLabel: 'NodeFlowCanvas');
+
+  /// The focus node for the canvas.
+  ///
+  /// Used to capture keyboard events. The editor widget automatically
+  /// manages this focus node. You can manually request focus if needed:
+  ///
+  /// ```dart
+  /// controller.canvasFocusNode.requestFocus();
+  /// ```
+  FocusNode get canvasFocusNode => _canvasFocusNode;
+
+  // Behavior mode
+  final Observable<NodeFlowBehavior> _behavior = Observable(
+    NodeFlowBehavior.design,
+  );
+
+  /// The current behavior mode determining what interactions are allowed.
+  ///
+  /// Use this to check capabilities:
+  /// ```dart
+  /// if (controller.behavior.canDelete) {
+  ///   // Allow deletion
+  /// }
+  /// ```
+  NodeFlowBehavior get behavior => _behavior.value;
+
+  /// Sets the behavior mode for the canvas.
+  ///
+  /// This controls what CRUD operations are allowed on nodes, ports,
+  /// and connections.
+  void setBehavior(NodeFlowBehavior value) {
+    runInAction(() => _behavior.value = value);
+  }
+
+  // Core data structures
+  final ObservableMap<String, Node<T>> _nodes =
+      ObservableMap<String, Node<T>>();
+  final ObservableList<Connection<C>> _connections =
+      ObservableList<Connection<C>>();
+  final GraphSceneProjection<T, C> _sceneProjection =
+      GraphSceneProjection<T, C>();
+  final Map<String, VoidCallback> _sceneNodeReactions = {};
+  final Map<String, VoidCallback> _sceneConnectionReactions = {};
+  final Map<String, Node<T>> _sceneNodeSources = {};
+  final Map<String, Connection<C>> _sceneConnectionSources = {};
+  final List<ReactionDisposer> _sceneCollectionReactions = [];
+  final ObservableSet<String> _selectedNodeIds = ObservableSet<String>();
+  final ObservableSet<String> _selectedConnectionIds = ObservableSet<String>();
+  final Observable<GraphViewport> _viewport;
+  late final ValueNotifier<GraphViewport> _cameraViewport = ValueNotifier(
+    _viewport.value,
+  );
+  late final Observable<GraphViewport> _cullingViewport = Observable(
+    _viewport.value,
+  );
+  final Observable<Size> _screenSize = Observable(Size.zero);
+
+  // Stable, allocation-free public views over the observable collections.
+  // The wrappers delegate reads to their MobX-backed sources, so collection
+  // access remains reactive inside Observer/autorun while mutation stays behind
+  // the controller API.
+  late final Map<String, Node<T>> _nodesView = UnmodifiableMapView(_nodes);
+  late final List<Connection<C>> _connectionsView = UnmodifiableListView(
+    _connections,
+  );
+  late final Set<String> _selectedNodeIdsView = UnmodifiableSetView(
+    _selectedNodeIds,
+  );
+  late final Set<String> _selectedConnectionIdsView = UnmodifiableSetView(
+    _selectedConnectionIds,
+  );
+
+  /// Direct callback to trigger viewport animations.
+  ///
+  /// This callback is set by [NodeFlowEditor] and invoked by
+  /// [animateTo] and [animateToNode] to trigger smooth viewport animations.
+  /// Parameters duration and curve are optional with sensible defaults.
+  void Function(GraphViewport target, {Duration duration, Curve curve})?
+  _onAnimateToViewport;
+
+  /// Token identifying which widget set the current animation handler.
+  /// Used to prevent race conditions when widgets are recreated.
+  Object? _animateToHandlerToken;
+
+  /// Key for the canvas widget, used to convert global coordinates to canvas-local.
+  final GlobalKey canvasKey = GlobalKey();
+
+  /// Current mouse position in world coordinates (null if mouse is outside canvas).
+  /// Used for debug visualization and other features that need cursor tracking.
+  final Observable<Offset?> _mousePositionWorld = Observable<Offset?>(null);
+
+  // Interaction state - organized in separate object
+  final InteractionState interaction = InteractionState();
+
+  /// Creates a drag session for managing drag operation lifecycle.
+  ///
+  /// The session automatically handles canvas locking/unlocking. Elements
+  /// just need to call lifecycle methods: [start], [end], [cancel].
+  ///
+  /// Only one session can be active at a time. Creating a new session while
+  /// one is active will cancel the existing session first.
+  ///
+  /// Example:
+  /// ```dart
+  /// DragSession? _session;
+  ///
+  /// void _handleDragStart(details) {
+  ///   _originalPosition = node.position.value; // Capture state
+  ///   _session = controller.createSession(DragSessionType.nodeDrag);
+  ///   _session!.start(); // Locks canvas
+  /// }
+  ///
+  /// void _handleDragEnd(details) {
+  ///   _session?.end(); // Unlocks canvas
+  ///   _session = null;
+  /// }
+  ///
+  /// void _handleDragCancel() {
+  ///   _session?.cancel(); // Unlocks canvas
+  ///   _session = null;
+  ///   node.position.value = _originalPosition!; // Restore state
+  /// }
+  /// ```
+  DragSession createSession(DragSessionType type) {
+    // Cancel any existing active session
+    _activeSession?.cancel();
+
+    // Create new session
+    _activeSession = _DragSessionImpl(type, interaction, _onSessionEnded);
+    return _activeSession!;
+  }
+
+  /// The currently active drag session, if any.
+  _DragSessionImpl? _activeSession;
+
+  /// Called when a session ends (either by end() or cancel()).
+  void _onSessionEnded() {
+    _activeSession = null;
+  }
+
+  // Node monitoring for GroupNode tracking
+  // Track previous node IDs to detect additions/deletions
+  Set<String> _previousNodeIds = {};
+  // Flag to prevent cyclic updates when moving group child nodes
+  bool _isMovingGroupNodes = false;
+
+  // Connection painting and hit-testing
+  ConnectionPainter? _connectionPainter;
+
+  /// Connection path cache - the data layer for connection geometry.
+  /// Controller owns this; painter uses it for rendering.
+  ConnectionPathCache? _connectionPathCache;
+
+  // Connection segment calculator for spatial index (set by _initController)
+  List<Rect> Function(Connection connection)? _connectionSegmentCalculator;
+
+  // Spatial hit testing
+  late final GraphSpatialIndex<T, C> _spatialIndex = GraphSpatialIndex<T, C>(
+    portSnapDistance: _config.portSnapDistance.value,
+  );
+
+  // Pending spatial index updates (dirty tracking)
+  final Set<String> _pendingNodeUpdates = {};
+  final Set<String> _pendingConnectionUpdates = {};
+
+  // Connection index for O(1) lookup by node ID
+  final Map<String, Set<String>> _connectionsByNodeId = {};
+
+  // Connection index for O(1) lookup by connection ID
+  final Map<String, Connection<C>> _connectionById = {};
+
+  // Editor initialization tracking - set to true after initializeForEditor() is called
+  bool _editorInitialized = false;
+
+  // Actions and shortcuts management
+  late final NodeFlowShortcutManager<T> shortcuts;
+
+  // zIndex version counter — incremented when any node's zIndex changes.
+  // Used by _sortedVisibleNodes to skip re-sorting when zIndex is unchanged.
+  final Observable<int> _zIndexVersion = Observable(0);
+
+  /// Increments the zIndex version counter.
+  /// Call this after mutating any node's zIndex.
+  void _bumpZIndexVersion() {
+    runInAction(() => _zIndexVersion.value++);
+  }
+
+  // Caching state for smart culling (hysteresis)
+  // We query a larger chunk and only re-query when approaching the edge
+  Rect? _cachedNodeQueryRect;
+  List<Node<T>> _cachedVisibleNodesList = [];
+  int _lastNodeIndexVersion = -1;
+
+  Rect? _cachedConnectionQueryRect;
+  List<Connection<C>> _cachedVisibleConnectionsList = [];
+  int _lastConnectionIndexVersion = -1;
+
+  // Computed values - stored as late final fields for proper caching
+  late final Computed<bool> _hasSelection = Computed(
+    () => _selectedNodeIds.isNotEmpty || _selectedConnectionIds.isNotEmpty,
+  );
+
+  /// Set of "nodeId:portId" keys for all connected ports.
+  /// MobX Computed — recomputed only when _connections changes.
+  late final Computed<Set<String>> _connectedPortKeys = Computed(() {
+    final keys = <String>{};
+    for (final conn in _connections) {
+      keys.add('${conn.sourceNodeId}:${conn.sourcePortId}');
+      keys.add('${conn.targetNodeId}:${conn.targetPortId}');
+    }
+    return keys;
+  });
+
+  /// O(1) check whether a port has any connection.
+  bool isPortConnected(String nodeId, String portId) {
+    return _connectedPortKeys.value.contains('$nodeId:$portId');
+  }
+
+  late final Computed<List<Node<T>>> _sortedNodes = Computed(
+    _computeSortedNodes,
+  );
+
+  /// Cached bounds for the complete graph.
+  ///
+  /// Keeping this computed alive makes repeated API reads O(1). MobX tracks the
+  /// node collection plus each node's position and size, invalidating the cache
+  /// only when geometry actually changes.
+  late final Computed<Rect> _nodesBounds = Computed(
+    _computeNodesBounds,
+    keepAlive: true,
+  );
+
+  /// Connections currently affected by an interaction (drag/resize).
+  /// These should be rendered in the active layer.
+  late final Computed<Set<String>> _activeConnectionIds = Computed(() {
+    final draggedId = interaction.currentDraggedNodeId;
+    final resizingId = interaction.currentResizingNodeId;
+
+    if (draggedId != null) {
+      return _connectionsByNodeId[draggedId] ?? const {};
+    }
+    if (resizingId != null) {
+      return _connectionsByNodeId[resizingId] ?? const {};
+    }
+    return const {};
+  });
+
+  /// Nodes currently affected by an interaction (drag/resize).
+  /// When dragging a selected node, ALL selected nodes are active since they move together.
+  /// These should be rendered in the active layer for 60fps during interaction.
+  late final Computed<Set<String>> _activeNodeIds = Computed(() {
+    final result = <String>{};
+    final draggedId = interaction.currentDraggedNodeId;
+    final resizingId = interaction.currentResizingNodeId;
+
+    // If dragging, check if the dragged node is in selection
+    // If so, all selected nodes are active (they move together)
+    if (draggedId != null) {
+      if (_selectedNodeIds.contains(draggedId)) {
+        result.addAll(_selectedNodeIds);
+      } else {
+        result.add(draggedId);
+      }
+    }
+
+    // Resizing always affects only one node
+    if (resizingId != null) result.add(resizingId);
+
+    return result;
+  });
+
+  /// Nodes intersecting the actual viewport, without the culling preload.
+  ///
+  /// Rendering uses a much larger hysteresis rectangle so small camera moves do
+  /// not repeatedly query the spatial index. That preload is intentionally not
+  /// used for density decisions such as adaptive LOD.
+  late final Computed<List<Node<T>>> _nodesInViewport = Computed(() {
+    final v = _cullingViewport.value;
+    final s = _screenSize.value;
+    // Establish the MobX dependency before querying the non-observable index.
+    _spatialIndex.version.value;
+
+    if (s.isEmpty) return List<Node<T>>.unmodifiable(_nodes.values);
+
+    final viewportRect = Rect.fromLTWH(
+      -v.x / v.zoom,
+      -v.y / v.zoom,
+      s.width / v.zoom,
+      s.height / v.zoom,
+    );
+    return List<Node<T>>.unmodifiable(_spatialIndex.nodesIn(viewportRect));
+  });
+
+  /// Visible nodes based on current viewport with hysteresis.
+  late final Computed<List<Node<T>>> _visibleNodes = Computed(() {
+    // Culling follows a coalesced camera viewport rather than every transform
+    // tick. The live camera remains available through [viewport].
+    final v = _cullingViewport.value;
+    final s = _screenSize.value;
+
+    if (s.isEmpty) return _nodes.values.toList();
+
+    // Calculate current viewport rect
+    final currentViewportRect = Rect.fromLTWH(
+      -v.x / v.zoom,
+      -v.y / v.zoom,
+      s.width / v.zoom,
+      s.height / v.zoom,
+    );
+
+    // Check if spatial index changed
+    final currentIndexVersion = _spatialIndex.version.value;
+    final indexChanged = currentIndexVersion != _lastNodeIndexVersion;
+
+    // Check if viewport is safely within cached query rect (Hysteresis)
+    // We use a margin of 200px. If we are within 200px of the edge of the
+    // cached area, we trigger a re-query.
+    final cacheValid =
+        !indexChanged &&
+        _cachedNodeQueryRect != null &&
+        _cachedNodeQueryRect!.contains(
+          currentViewportRect.topLeft - const Offset(200, 200),
+        ) &&
+        _cachedNodeQueryRect!.contains(
+          currentViewportRect.bottomRight + const Offset(200, 200),
+        );
+
+    if (cacheValid) {
+      return _cachedVisibleNodesList;
+    }
+
+    // Re-query: Expand viewport by 1000px (chunk size)
+    final queryRect = currentViewportRect.inflate(1000);
+    final nodes = _spatialIndex.nodesIn(queryRect);
+
+    // Ensure currently interacting nodes are always included
+    final draggedId = interaction.currentDraggedNodeId;
+    final resizingId = interaction.currentResizingNodeId;
+
+    void ensureIncluded(String? id) {
+      if (id == null) return;
+      final node = _nodes[id];
+      if (node != null && !nodes.contains(node)) {
+        nodes.add(node);
+      }
+    }
+
+    ensureIncluded(draggedId);
+    ensureIncluded(resizingId);
+
+    // Update cache
+    _cachedNodeQueryRect = queryRect;
+    _cachedVisibleNodesList = nodes;
+    _lastNodeIndexVersion = currentIndexVersion;
+
+    return nodes;
+  });
+
+  /// Visible connections based on current viewport with hysteresis.
+  late final Computed<List<Connection<C>>> _visibleConnections = Computed(() {
+    // Culling follows a coalesced camera viewport rather than every transform
+    // tick. The live camera remains available through [viewport].
+    final v = _cullingViewport.value;
+    final s = _screenSize.value;
+
+    if (s.isEmpty) return _connections;
+
+    final currentViewportRect = Rect.fromLTWH(
+      -v.x / v.zoom,
+      -v.y / v.zoom,
+      s.width / v.zoom,
+      s.height / v.zoom,
+    );
+
+    final currentIndexVersion = _spatialIndex.version.value;
+    final indexChanged = currentIndexVersion != _lastConnectionIndexVersion;
+
+    final cacheValid =
+        !indexChanged &&
+        _cachedConnectionQueryRect != null &&
+        _cachedConnectionQueryRect!.contains(
+          currentViewportRect.topLeft - const Offset(200, 200),
+        ) &&
+        _cachedConnectionQueryRect!.contains(
+          currentViewportRect.bottomRight + const Offset(200, 200),
+        );
+
+    if (cacheValid) {
+      return _cachedVisibleConnectionsList;
+    }
+
+    final queryRect = currentViewportRect.inflate(1000);
+    final connections = _spatialIndex.connectionsIn(queryRect);
+
+    _cachedConnectionQueryRect = queryRect;
+    _cachedVisibleConnectionsList = connections;
+    _lastConnectionIndexVersion = currentIndexVersion;
+
+    return connections;
+  });
+
+  // Cache for sorted visible nodes — avoids re-sorting when only viewport changed
+  List<Node<T>>? _cachedSortedVisible;
+  List<Node<T>>? _lastVisibleNodesRef;
+  int _lastZIndexVersion = -1;
+
+  /// Visible nodes sorted by z-index (cached Computed).
+  /// Skips O(n log n) sort when only the viewport moved (zIndex unchanged).
+  late final Computed<List<Node<T>>> _sortedVisibleNodes = Computed(() {
+    final visible = _visibleNodes.value;
+    final zVer = _zIndexVersion.value;
+
+    // If same visible list reference AND same zIndex version, reuse cached sort
+    if (identical(visible, _lastVisibleNodesRef) &&
+        zVer == _lastZIndexVersion &&
+        _cachedSortedVisible != null) {
+      return _cachedSortedVisible!;
+    }
+
+    // Need to re-sort
+    final nodes = List<Node<T>>.from(visible);
+    nodes.sort((a, b) => a.zIndex.value.compareTo(b.zIndex.value));
+
+    _lastVisibleNodesRef = visible;
+    _lastZIndexVersion = zVer;
+    _cachedSortedVisible = nodes;
+
+    return nodes;
+  });
+
+  // Public API - only what external consumers need
+
+  /// Gets all connections in the graph.
+  ///
+  /// Returns a stable, read-only live view. Reads remain reactive inside MobX
+  /// observers, while graph mutations must go through controller methods such
+  /// as [addConnection] and [removeConnection].
+  List<Connection<C>> get connections => _connectionsView;
+
+  /// Gets the IDs of all currently selected nodes.
+  ///
+  /// Returns a stable, read-only live view. An empty set means no nodes are
+  /// selected. Use [selectNode], [selectNodes], or [clearNodeSelection] to
+  /// change selection.
+  Set<String> get selectedNodeIds => _selectedNodeIdsView;
+
+  /// Gets the current viewport state (position and zoom).
+  ///
+  /// The viewport determines what portion of the graph is visible and at
+  /// what zoom level.
+  /// Gets the live camera viewport.
+  ///
+  /// During an interactive pan or zoom this value updates without invalidating
+  /// the graph-wide MobX state or emitting plugin events on every engine tick.
+  /// Use [viewportObservable] when observing committed viewport changes.
+  GraphViewport get viewport => _cameraViewport.value;
+
+  /// Lightweight live-camera signal for renderers and overlays.
+  ///
+  /// This signal is intentionally separate from the committed MobX viewport so
+  /// high-frequency camera movement can repaint isolated UI without rebuilding
+  /// the graph model.
+  ValueListenable<GraphViewport> get cameraViewportListenable =>
+      _cameraViewport;
+
+  /// Coalesced camera viewport used by spatial culling and render-policy
+  /// decisions. It updates when the camera leaves its cached query area or
+  /// changes zoom materially, rather than on every transform tick.
+  GraphViewport get renderViewport => _cullingViewport.value;
+
+  /// Gets the viewport observable for reactive UI updates.
+  ///
+  /// Use this when you need to observe viewport changes in MobX Observer widgets.
+  /// Access `.value` to get the current [GraphViewport].
+  ///
+  /// Example:
+  /// ```dart
+  /// Observer(builder: (_) => Text('Zoom: ${controller.viewportObservable.value.zoom}'));
+  /// ```
+  Observable<GraphViewport> get viewportObservable => _viewport;
+
+  /// Checks if there is any active selection (nodes or connections).
+  ///
+  /// Returns `true` if anything is selected, `false` otherwise.
+  bool get hasSelection => _hasSelection.value;
+
+  /// Gets all nodes in the graph.
+  ///
+  /// Returns a stable, read-only live view keyed by node ID. Reads remain
+  /// reactive inside MobX observers. Use the controller's node mutation methods
+  /// rather than modifying this map directly.
+  Map<String, Node<T>> get nodes => _nodesView;
+
+  // Package-private - for internal widget use only
+
+  /// Gets nodes sorted by z-index (package-private).
+  ///
+  /// Lower z-index nodes render first (behind), higher z-index nodes render last (on top).
+  /// This is primarily for internal use by the editor widget for proper rendering order.
+  List<Node<T>> get sortedNodes => _sortedNodes.value;
+
+  /// Gets visible nodes sorted by z-index (package-private).
+  ///
+  /// Optimized for rendering only what's on screen.
+  /// Uses cached Computed to avoid sorting on every access.
+  List<Node<T>> get visibleNodes => _sortedVisibleNodes.value;
+
+  /// Gets nodes intersecting the actual on-screen graph bounds.
+  ///
+  /// Unlike [visibleNodes], this list excludes the off-screen culling preload.
+  /// It is read-only, reactive, and intended for viewport statistics and
+  /// density-based rendering policy rather than direct scene rendering.
+  List<Node<T>> get nodesInViewport => _nodesInViewport.value;
+
+  /// Gets visible connections (package-private).
+  List<Connection<C>> get visibleConnections => _visibleConnections.value;
+
+  /// Gets IDs of connections involved in current interaction (package-private).
+  Set<String> get activeConnectionIds => _activeConnectionIds.value;
+
+  /// Gets IDs of nodes involved in current interaction (package-private).
+  /// When dragging a selected node, includes ALL selected nodes.
+  Set<String> get activeNodeIds => _activeNodeIds.value;
+
+  /// Gets the current screen/canvas size (package-private).
+  ///
+  /// This is used for viewport calculations. Updated automatically by the editor widget.
+  Size get screenSize => _screenSize.value;
+
+  /// Gets the ID of the node currently being dragged, if any (package-private).
+  ///
+  /// Returns `null` if no node is being dragged.
+  String? get draggedNodeId => interaction.currentDraggedNodeId;
+
+  /// Checks if a connection is currently being created (package-private).
+  ///
+  /// Returns `true` while dragging from a port to create a connection.
+  bool get isConnecting => interaction.isCreatingConnection;
+
+  /// Gets the temporary connection being created, if any (package-private).
+  ///
+  /// Returns `null` if no connection is being created.
+  TemporaryConnection? get temporaryConnection =>
+      interaction.temporaryConnection.value;
+
+  /// Checks if a selection rectangle is being drawn (package-private).
+  ///
+  /// Returns `true` during shift+drag selection operations.
+  bool get isDrawingSelection => interaction.isDrawingSelection;
+
+  /// Gets the last known pointer position in screen/widget-local coordinates (package-private).
+  ///
+  /// Used for drag operations. Returns `null` if no pointer position is tracked.
+  ScreenPosition? get pointerPosition => interaction.pointerPosition;
+
+  /// Gets the current selection rectangle in graph coordinates (package-private).
+  ///
+  /// Returns `null` if no selection rectangle is active.
+  /// The rectangle is in graph coordinates for hit testing against node positions.
+  GraphRect? get selectionRect => interaction.currentSelectionRect;
+
+  /// Gets the starting point of the selection rectangle in graph coordinates (package-private).
+  ///
+  /// Returns `null` if no selection is being drawn.
+  /// This is where the user first pressed to begin the selection drag.
+  GraphPosition? get selectionStartPoint => interaction.selectionStartPoint;
+
+  /// Checks if the canvas is locked (pan/zoom disabled) (package-private).
+  ///
+  /// Canvas is locked during drag operations (nodes, connections, resize)
+  /// to prevent coordinate misalignment when the viewport changes mid-drag.
+  bool get canvasLocked => interaction.isCanvasLocked;
+
+  // ===========================================================================
+  // Resize State
+  // ===========================================================================
+
+  /// Gets the ID of the node currently being resized (package-private).
+  ///
+  /// Works for all node types including [GroupNode] and [CommentNode].
+  /// Returns null if no resize operation is in progress.
+  String? get resizingNodeId => interaction.currentResizingNodeId;
+
+  /// Checks if any resize operation is in progress (package-private).
+  ///
+  /// Returns true when any node is being resized.
+  bool get isResizing => interaction.isResizing;
+
+  /// Gets the IDs of all currently selected connections (package-private).
+  ///
+  /// Returns a stable, read-only live view. An empty set means no connections
+  /// are selected. Use [selectConnection] or [clearConnectionSelection] to
+  /// change selection.
+  Set<String> get selectedConnectionIds => _selectedConnectionIdsView;
+
+  /// Gets the hit tester for spatial queries (package-private).
+  ///
+  /// Used by the editor for efficient hit testing with spatial indexing.
+  GraphSpatialIndex<T, C> get spatialIndex => _spatialIndex;
+
+  List<Node<T>> _computeSortedNodes() {
+    // Create a list from nodes and sort by zIndex
+    final nodesList = _nodes.values.toList();
+
+    // Trigger observation of all zIndex values to ensure reactivity
+    for (final node in nodesList) {
+      node.zIndex.value; // Observe zIndex changes
+    }
+
+    // Sort by zIndex ascending (lower zIndex = rendered first = behind)
+    nodesList.sort((a, b) => a.zIndex.value.compareTo(b.zIndex.value));
+
+    return nodesList;
+  }
+
+  Rect _computeNodesBounds() {
+    if (_nodes.isEmpty) return Rect.zero;
+
+    double minX = double.infinity;
+    double minY = double.infinity;
+    double maxX = double.negativeInfinity;
+    double maxY = double.negativeInfinity;
+
+    for (final node in _nodes.values) {
+      final position = node.position.value;
+      final size = node.size.value;
+      minX = math.min(minX, position.dx);
+      minY = math.min(minY, position.dy);
+      maxX = math.max(maxX, position.dx + size.width);
+      maxY = math.max(maxY, position.dy + size.height);
+    }
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  // NOTE: _setupNodeMonitoringReactions() and _setupSelectionReactions()
+  // are defined in group_api.dart.
+  //
+  // NOTE: _setupSpatialIndexReactions() is defined in editor_init_api.dart.
+  // It is called during _initController() to set up spatial index synchronization.
+
+  /// Gets the connection painter used for rendering and hit-testing connections.
+  ///
+  /// The connection painter is initialized during [initController], which is
+  /// typically called automatically by the editor widget during its initState.
+  ///
+  /// Throws `StateError` if accessed before initialization.
+  ConnectionPainter get connectionPainter {
+    if (_connectionPainter == null) {
+      throw StateError(
+        'ConnectionPainter not initialized. '
+        'Ensure the controller is used with a NodeFlowEditor widget.',
+      );
+    }
+    return _connectionPainter!;
+  }
+
+  /// Whether the connection painter has been initialized.
+  /// Use this to guard access to [connectionPainter] during initialization.
+  bool get isConnectionPainterInitialized => _connectionPainter != null;
+
+  /// Gets the connection path cache (data layer).
+  ///
+  /// Use this for geometry queries (hit testing, bounds intersection).
+  /// Throws `StateError` if accessed before initialization.
+  ConnectionPathCache get connectionPathCache {
+    if (_connectionPathCache == null) {
+      throw StateError(
+        'ConnectionPathCache not initialized. '
+        'Ensure the controller is used with a NodeFlowEditor widget.',
+      );
+    }
+    return _connectionPathCache!;
+  }
+
+  /// Disposes of the controller and releases resources.
+  ///
+  /// Call this when you're done using the controller to clean up resources
+  /// like the canvas focus node and connection painter.
+  ///
+  /// Example:
+  /// ```dart
+  /// @override
+  /// void dispose() {
+  ///   controller.dispose();
+  ///   super.dispose();
+  /// }
+  /// ```
+  void dispose() {
+    _disposeSceneProjection();
+    _canvasFocusNode.dispose();
+    _connectionPainter?.dispose();
+    _cameraViewport.dispose();
+
+    // Detach all plugins
+    for (final plugin in _plugins.toList()) {
+      plugin.detach();
+    }
+    _plugins.clear();
+
+    // Detach context from all groupable nodes to clean up their reactions
+    for (final node in _nodes.values) {
+      if (node is GroupableMixin<T>) {
+        node.detachContext();
+      }
+    }
+  }
+
+  // ============================================================
+  // Plugin System
+  // ============================================================
+
+  /// Registered plugins for this controller.
+  final List<NodeFlowPlugin> _plugins = [];
+
+  /// Current batch nesting depth.
+  /// When > 0, we're inside a batch operation.
+  int _batchDepth = 0;
+
+  // ─────────────────────────────────────────────────────────────────
+  // POC vendor 补丁(v0.4.1 阶段2 尺寸编辑模式)
+  // 移动端显式尺寸编辑:宿主把某节点置为"仅尺寸编辑"——该节点整体拖动被
+  // 抑制(NodeContainer 据此关 isDraggable),resize 把手免选中常显且命中
+  // 区放大(整边框带可拖),消除触摸路由把"拖把手"抢成"拖节点"的竞争。
+  // ─────────────────────────────────────────────────────────────────
+
+  final Observable<String?> _resizeOnlyNodeId = Observable<String?>(null);
+
+  /// 当前"仅尺寸编辑"目标节点 id(可空 = 未激活)。
+  String? get resizeOnlyNodeId => _resizeOnlyNodeId.value;
+
+  /// 进入/退出尺寸编辑模式(传 null 退出)。
+  void setResizeOnlyNode(String? nodeId) =>
+      runInAction(() => _resizeOnlyNodeId.value = nodeId);
+
+  // ─────────────────────────────────────────────────────────────────
+  // POC vendor 补丁(v0.5.0 阶段3 hover)
+  // 鼠标悬停态(桌面/Web):NodeContainer MouseRegion 驱动节点、编辑器
+  // hit-testing 驱动连线;渲染层据此高亮(节点卡/连线快照),触摸恒 null。
+  // ─────────────────────────────────────────────────────────────────
+
+  final Observable<String?> _hoveredNodeId = Observable<String?>(null);
+  final Observable<String?> _hoveredConnectionId = Observable<String?>(null);
+
+  /// 当前悬停节点 id(鼠标;null = 无)。
+  String? get hoveredNodeId => _hoveredNodeId.value;
+
+  /// 当前悬停连线 id(鼠标;null = 无)。
+  String? get hoveredConnectionId => _hoveredConnectionId.value;
+
+  /// 更新悬停节点(内部置 node.isHovered,仅新旧两卡响应)。
+  void setHoverNode(String? nodeId) {
+    runInAction(() {
+      final String? oldId = _hoveredNodeId.value;
+      if (oldId == nodeId) return;
+      final Node<T>? oldNode = oldId == null ? null : _nodes[oldId];
+      if (oldNode != null && oldNode.isHovered) oldNode.setHovered(false);
+      _hoveredNodeId.value = nodeId;
+      final Node<T>? newNode = nodeId == null ? null : _nodes[nodeId];
+      newNode?.setHovered(true);
+    });
+  }
+
+  /// 更新悬停连线(渲染层读该值重建快照)。
+  void setHoverConnection(String? connectionId) =>
+      runInAction(() => _hoveredConnectionId.value = connectionId);
+
+  /// Registers a plugin with this controller.
+  ///
+  /// The plugin's [NodeFlowPlugin.attach] method is called immediately.
+  /// Throws a [StateError] if a plugin with the same ID is already registered.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.addPlugin(UndoRedoPlugin<MyData>());
+  /// ```
+  void addPlugin(NodeFlowPlugin plugin) {
+    if (_plugins.any((e) => e.id == plugin.id)) {
+      throw StateError(
+        'Plugin "${plugin.id}" is already registered. '
+        'Remove it first before adding a new instance.',
+      );
+    }
+    _plugins.add(plugin);
+    plugin.attach(this);
+  }
+
+  /// Removes a plugin by its ID.
+  ///
+  /// The plugin's [NodeFlowPlugin.detach] method is called before removal.
+  /// Does nothing if no plugin with the given ID is registered.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.removePlugin('undo-redo');
+  /// ```
+  void removePlugin(String id) {
+    final index = _plugins.indexWhere((e) => e.id == id);
+    if (index == -1) return;
+
+    final plugin = _plugins.removeAt(index);
+    plugin.detach();
+  }
+
+  /// Gets a plugin by its type.
+  ///
+  /// Returns `null` if no plugin of the given type is registered.
+  /// Useful for plugins that expose additional capabilities.
+  ///
+  /// Example:
+  /// ```dart
+  /// final history = controller.getPlugin<HistoryPlugin>();
+  /// if (history?.canUndo ?? false) {
+  ///   history!.undo();
+  /// }
+  /// ```
+  E? getPlugin<E extends NodeFlowPlugin>() {
+    for (final ext in _plugins) {
+      if (ext is E) return ext;
+    }
+    return null;
+  }
+
+  /// Resolves a plugin by type.
+  ///
+  /// Checks the controller's attached plugins first, then falls back to
+  /// the config's plugin registry.
+  ///
+  /// Returns `null` if the plugin is not found.
+  ///
+  /// Example:
+  /// ```dart
+  /// final minimap = controller.resolvePlugin<MinimapPlugin>();
+  /// minimap?.toggle();
+  /// ```
+  E? resolvePlugin<E extends NodeFlowPlugin>() {
+    // First check if already attached
+    var ext = getPlugin<E>();
+    if (ext != null) return ext;
+
+    // Try to get from registry and attach
+    ext = config.pluginRegistry.get<E>();
+    if (ext != null) {
+      addPlugin(ext);
+    }
+    return ext;
+  }
+
+  /// Checks if a plugin with the given ID is registered.
+  ///
+  /// Example:
+  /// ```dart
+  /// if (controller.hasPlugin('undo-redo')) {
+  ///   // Undo/redo is available
+  /// }
+  /// ```
+  bool hasPlugin(String id) => _plugins.any((e) => e.id == id);
+
+  /// Gets all registered plugins.
+  ///
+  /// Returns an unmodifiable view of the plugins list.
+  List<NodeFlowPlugin> get plugins => List.unmodifiable(_plugins);
+
+  /// Emits an event to all registered plugins.
+  ///
+  /// Called internally by mutation methods. Plugins receive events
+  /// in the order they were registered.
+  void _emitEvent(GraphEvent event) {
+    for (final plugin in _plugins) {
+      plugin.onEvent(event);
+    }
+  }
+
+  /// Applies synchronous graph changes through one reactive invalidation
+  /// boundary.
+  ///
+  /// Use this for logical topology changes that touch multiple nodes and
+  /// connections, such as expanding a node into a subgraph or replacing a
+  /// generated branch. MobX observers are notified after the outer mutation,
+  /// and the spatial index publishes at most one revision for the operation.
+  ///
+  /// Per-element node and connection callbacks/events are preserved. Plugins
+  /// additionally see [BatchStarted] before the mutation and [BatchEnded]
+  /// after it, so history and persistence plugins can treat it as one logical
+  /// change. Nested mutations join the outer boundary and emit no extra batch
+  /// events.
+  ///
+  /// [mutation] must be synchronous. This API consolidates notifications but
+  /// does not provide rollback: if it throws, changes completed before the
+  /// exception remain applied and [BatchEnded] is still emitted.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.mutateGraph(
+  ///   () {
+  ///     controller.addNode(generatedNode);
+  ///     controller.addConnections([incoming, outgoing]);
+  ///   },
+  ///   reason: 'expand-generated-node',
+  /// );
+  /// ```
+  void mutateGraph(
+    void Function() mutation, {
+    String reason = 'graph-mutation',
+  }) {
+    final isOutermost = _batchDepth == 0;
+    if (isOutermost) {
+      _emitEvent(BatchStarted(reason));
+    }
+    _batchDepth++;
+
+    try {
+      if (isOutermost) {
+        _spatialIndex.batch(() => runInAction(mutation));
+      } else {
+        mutation();
+      }
+    } finally {
+      _batchDepth--;
+      if (_batchDepth == 0) {
+        _emitEvent(BatchEnded());
+      }
+    }
+  }
+
+  /// Legacy name for [mutateGraph].
+  @Deprecated('Use mutateGraph(callback, reason: reason) instead.')
+  void batch(String reason, void Function() operations) {
+    mutateGraph(operations, reason: reason);
+  }
+}
+
+// NOTE: DirtyTrackingPlugin is defined in dirty_tracking_api.dart.
+
+/// Private implementation of [DragSession].
+///
+/// This class is internal to the controller and should not be exposed.
+/// It handles canvas locking/unlocking and notifies the controller when ended.
+class _DragSessionImpl implements DragSession {
+  _DragSessionImpl(this._type, this._interaction, this._onEnded);
+
+  final DragSessionType _type;
+  final InteractionState _interaction;
+  final VoidCallback _onEnded;
+
+  bool _isActive = false;
+
+  @override
+  DragSessionType get type => _type;
+
+  @override
+  bool get isActive => _isActive;
+
+  @override
+  void start() {
+    if (_isActive) return;
+
+    runInAction(() {
+      _isActive = true;
+      _interaction.canvasLocked.value = true;
+    });
+  }
+
+  @override
+  void end() {
+    if (!_isActive) return;
+
+    runInAction(() {
+      _isActive = false;
+      _interaction.canvasLocked.value = false;
+    });
+
+    _onEnded();
+  }
+
+  @override
+  void cancel() {
+    if (!_isActive) return;
+
+    runInAction(() {
+      _isActive = false;
+      _interaction.canvasLocked.value = false;
+    });
+
+    _onEnded();
+  }
+}

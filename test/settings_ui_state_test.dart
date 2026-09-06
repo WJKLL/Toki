@@ -16,12 +16,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/entities/app_settings.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/features/settings/page_p01_02_settings_page.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
+import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 
 void main() {
   testWidgets('设置页开关/分段点击后 UI 状态同步更新（回归 v1.0.6）', (tester) async {
@@ -45,6 +47,8 @@ void main() {
           agreementRepositoryProvider.overrideWithValue(
             AgreementRepositoryImpl(prefs),
           ),
+          // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
+          todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
         ],
         child: const XiangJuGongApp(),
       ),

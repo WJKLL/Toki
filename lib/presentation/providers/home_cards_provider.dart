@@ -24,14 +24,12 @@ const List<HomeCardData> kDefaultGridCards = <HomeCardData>[
     remainingValue: '3h 20m',
     remainingDeadline: '截止 18:00',
   ),
+  // v1.49.0:仪表盘卡改为「待办」实时卡 —— 标题兜底在此,
+  // 数值/分段进度由 C29 内部 watch todoOverviewProvider 派生(此处置空)。
   DashboardCardData(
-    title: '📊 仪表盘',
-    stats: <DashboardStat>[
-      DashboardStat(value: '78%', label: '完成'),
-      DashboardStat(value: '12', label: '任务'),
-      DashboardStat(value: '4', label: '待办'),
-    ],
-    progress: <int>[3, 1, 1, 1],
+    title: '待办',
+    stats: <DashboardStat>[],
+    progress: <int>[],
   ),
   ClassCountdownCardData(),
 ];

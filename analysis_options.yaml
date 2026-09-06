@@ -14,6 +14,9 @@ analyzer:
     - build/**
     - android/**
     - web/**
+    # v1.44.0:vendor 依赖(flutter_flow_chart 本地拷贝)自带风格/告警,
+    #   不参与项目 lint 门禁(编译错误仍由构建器把关)。
+    - third_party/**
 
 linter:
   rules:

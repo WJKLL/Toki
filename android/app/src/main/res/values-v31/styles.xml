@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+)：系统 Splash Screen（原生开屏过渡）。
+         v1.44.x：应用图标(与 assets/app_icon.png 同图) + 品牌背景色，
+         系统自动呈现「图标浮现 → 缩放淡出到 Flutter 首帧」，与 Flutter 侧
+         C-50 品牌层同图同底无缝衔接；旧版 (<31) 仍走 launch_background。 -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

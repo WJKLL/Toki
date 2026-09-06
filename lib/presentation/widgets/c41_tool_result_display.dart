@@ -62,21 +62,40 @@ class C41ToolResultDisplay extends StatelessWidget {
 
   Widget _buildImage(BuildContext context) {
     final MiuixColors colors = MiuixTheme.of(context).colors;
-    // field 模式:URL 取自响应字段(如随机图封面/头像类接口未来用)。
+    // field 模式:字段值为图片地址 —— URL 直连 / data URI / 纯 base64
+    // (v1.41.0:抠图/水印接口返回纯 base64 PNG,魔数校验后解码)。
     final bool fieldMode = tool.result.source == 'field';
     final Widget? child;
-    Uint8List? saveBytes; // body 字节(直接保存)。
+    Uint8List? saveBytes; // 字节(直接保存):body 或 fieldBase64 解码。
     String? saveUrl; // field URL(保存时先下载)。
     if (fieldMode) {
-      final Object? url = _at(result.json, tool.result.imageField ?? '');
-      saveUrl = (url is String && url.isNotEmpty) ? url : null;
-      child = saveUrl != null
-          ? Image.network(
-              saveUrl,
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => _placeholder(context, '图片加载失败'),
-            )
-          : _placeholder(context, '无图片地址');
+      final Object? raw = _at(result.json, tool.result.imageField ?? '');
+      if (raw is String && raw.isNotEmpty) {
+        final (Uint8List?, String?) payload = _imagePayload(raw);
+        final Uint8List? decoded = payload.$1;
+        final String? url = payload.$2;
+        if (decoded != null) {
+          saveBytes = decoded;
+          child = Image.memory(
+            decoded,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) =>
+                _placeholder(context, '图片解析失败'),
+          );
+        } else if (url != null) {
+          saveUrl = url;
+          child = Image.network(
+            url,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => _placeholder(context, '图片加载失败'),
+          );
+        } else {
+          child = _placeholder(context, '无图片地址');
+        }
+      } else {
+        child = _placeholder(context, '无图片地址');
+      }
     } else if (result.bytes != null) {
       saveBytes = result.bytes;
       child = Image.memory(
@@ -562,5 +581,60 @@ class C41ToolResultDisplay extends StatelessWidget {
       }
     }
     return cur;
+  }
+
+  /// field 图片值解析（v1.41.0）：(解码字节, URL)—— data:image URI 剥头解码；
+  /// 纯 base64 需魔数校验（避免把 URL 误当 base64 解出垃圾）；否则按 URL。
+  (Uint8List?, String?) _imagePayload(String raw) {
+    String data = raw;
+    if (data.startsWith('data:image/')) {
+      final int comma = data.indexOf(',');
+      if (comma > 0) data = data.substring(comma + 1);
+      try {
+        return (base64Decode(data), null);
+      } on FormatException {
+        return (null, raw);
+      }
+    }
+    if (raw.length > 64) {
+      try {
+        final Uint8List decoded = base64Decode(raw);
+        if (_looksImage(decoded)) return (decoded, null);
+      } on FormatException {
+        // 非 base64 → 按 URL 处理。
+      }
+    }
+    return (null, raw);
+  }
+
+  /// 常见图片魔数（PNG/JPEG/GIF/WebP/BMP）。
+  bool _looksImage(Uint8List b) {
+    if (b.length < 12) return false;
+    if (b[0] == 0x89 &&
+        b[1] == 0x50 &&
+        b[2] == 0x4E &&
+        b[3] == 0x47) {
+      return true;
+    }
+    if (b[0] == 0xFF && b[1] == 0xD8) {
+      return true;
+    }
+    if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) {
+      return true;
+    }
+    if (b[0] == 0x42 && b[1] == 0x4D) {
+      return true;
+    }
+    if (b[0] == 0x52 &&
+        b[1] == 0x49 &&
+        b[2] == 0x46 &&
+        b[3] == 0x46 &&
+        b[8] == 0x57 &&
+        b[9] == 0x45 &&
+        b[10] == 0x42 &&
+        b[11] == 0x50) {
+      return true;
+    }
+    return false;
   }
 }

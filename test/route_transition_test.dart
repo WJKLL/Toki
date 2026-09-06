@@ -11,11 +11,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/features/settings/page_p01_02_settings_page.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
+import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 import 'package:xiangjugong/presentation/widgets/c26_more_menu.dart';
 
 /// 搭建应用外壳（协议已同意 + 可选预置开关状态）。
@@ -38,11 +40,16 @@ Future<SettingsRepositoryImpl> _pumpApp(
         agreementRepositoryProvider.overrideWithValue(
           AgreementRepositoryImpl(prefs),
         ),
+        // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
+        todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
       ],
       child: const XiangJuGongApp(),
     ),
   );
   await tester.pumpAndSettle(const Duration(milliseconds: 100));
+  // v1.43.0：初始落首页(page=1)由深链 jumpToPage 触发 ScrollEnd →
+  // S-16 高刷释放 3s Timer，需消化避免 Pending timers。
+  await tester.pump(const Duration(seconds: 4));
   return repository;
 }
 

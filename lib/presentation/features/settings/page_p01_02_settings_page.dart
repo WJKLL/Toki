@@ -1,5 +1,6 @@
 // lib/presentation/features/settings/page_p01_02_settings_page.dart
 // 编号：P-01-02 设置页（F-03 设置模块）
+// v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
 // 设置项：UI 模式（C-13 分段）· 主题与色彩入口 · Monet 开关 · 动效开关（毛玻璃+平滑动画,U-03）
 //         · 悬浮底栏（C-12）· 页面缩放（C-15）· 其他入口（调色板/权限/关于）
 // 组件：C-03 分组卡片、C-06 开关、C-07 下拉、C-13 分段选择器
@@ -31,7 +32,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/logging/log_export_service.dart';
 import '../../../core/reminder/reminder_service.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/c05_warning_card.dart';
@@ -42,8 +42,6 @@ import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../providers/steam_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
@@ -81,45 +79,30 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
     onTap: () => Navigator.of(context).maybePop(),
   );
 
-  // ── C-25（v1.12.3）：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  /// 页面级顶部快照（U-03 门控创建/释放；null = 降级纯 surface）。
-  MiuixLayerBackdrop? _topBackdrop;
-
+  // ── C-25（v1.12.3）：折叠滚动行为（v1.42.0 起纯折叠，无快照采样）──
   /// 顶部折叠滚动行为（MiuixTopAppBar + MiuixScrollBehaviorListener 联动）。
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
 
-  /// U-03 裁决创建/释放顶部快照（build 中调用，幂等）。
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    // ⚡ 功耗优化：顶部快照释放。
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
-
   // ── v1.36.0（课程提醒 · 测试触发，真机验证用）────────────────
 
-  /// 10 秒后弹「下节课」到点提醒。
+  /// 10 秒后弹「下节课」到点提醒；v1.40.1 起携带常驻参数 —— 到点后原生
+  /// 直启倒计时（2 分钟自治），可**杀进程验证** C 方案（闹钟拉起即常驻）。
   Future<void> _testAlert() async {
     unawaited(ReminderService.ensureChannels());
     await ReminderService.requestNotificationPermission();
+    final DateTime endAt = DateTime.now().add(const Duration(minutes: 2));
     final bool ok = await ReminderService.scheduleAlert(
       id: 1001,
       at: DateTime.now().add(const Duration(seconds: 10)),
       title: '下节课 · 高等数学（测试）',
       body: '第 3-4 节 · 09:50 开始',
+      endAtMillis: endAt.millisecondsSinceEpoch,
+      totalMinutes: 45,
+      endText: '第 3-4 节 · 11:30 结束',
     );
     if (!mounted) return;
-    showMiniToast(context, ok ? '已排 10 秒后到点提醒' : '排程失败，请查看日志');
+    showMiniToast(context, ok ? '已排 10 秒后到点（含常驻接管）' : '排程失败，请查看日志');
   }
 
   /// 启动「3 分钟」自治模拟常驻通知（原生按墙钟 10s 一更，不依赖本页）。
@@ -251,14 +234,6 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
     final MiuixColors colors = MiuixTheme.of(context).colors;
 
-    // v1.12.3（C-25）：顶部毛玻璃 U-03 裁决 + 快照幂等同步。
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: settings.blurEnabled,
-      isWeb: ref.watch(platformInfoProvider).isWeb,
-      androidSdkInt: ref.watch(platformInfoProvider).androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
-
     // 🔧 修复（v1.0.6）：交互型页面不得整体 TickerMode(false)——否则 MiuixSwitch
     //   圆点动画与 MiuixTabRow 指示器被静音冻结（"功能生效但视觉不变"根因）。
     //   交互控件动画瞬时（≤300ms），闲置期无 ticker 帧开销，功耗目标不受影响。
@@ -269,12 +244,11 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
         title: '设置',
         largeTitle: '设置',
         navigationIcon: _backButton,
-        actions: <Widget>[
+        actions: const <Widget>[
           // v1.13.0（C-26）：顶部更多菜单。
-          C26MoreMenu(backdrop: _topBackdrop),
+          C26MoreMenu(),
         ],
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         // v1.12.3：内容避让顶栏（padding.top = topBar 高度）；快照画
@@ -334,12 +308,6 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
           color: colors.surface,
           child: list,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : list;
         return Material(
           type: MaterialType.transparency,
           // 🔧 v1.0.7（布局稳定性）：Column + MainAxisAlignment.start 强制顶格。
@@ -351,7 +319,7 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
                 // v1.12.3：MiuixScrollBehaviorListener 桥接滚动折叠。
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
               // v1.9.0（S-13）：导出结果对话框（show 布尔驱动，常驻树）。

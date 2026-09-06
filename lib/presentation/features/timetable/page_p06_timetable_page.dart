@@ -20,16 +20,12 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/excel/excel_timetable_parser.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../domain/entities/class_period.dart';
 import '../../../domain/entities/course.dart';
 import '../../providers/course_provider.dart';
-import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/cards/card_shell.dart';
 
@@ -58,19 +54,9 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     onTap: () => Navigator.of(context).maybePop(),
   );
 
-  // ── C-25：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  MiuixLayerBackdrop? _topBackdrop;
+  // ── C-25：顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无页面级快照采样)──
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
-
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
 
   // ── 编辑状态 ──
   bool _sheetOpen = false;
@@ -93,13 +79,25 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
   final TextEditingController _gradeCtrl = TextEditingController();
   final TextEditingController _termCtrl = TextEditingController();
   final TextEditingController _weekCtrl = TextEditingController();
+  // v1.42.0:起止周输入(开始周/结束周)。
+  final TextEditingController _wsCtrl = TextEditingController();
+  final TextEditingController _weCtrl = TextEditingController();
 
   // 表单选择状态（新增时由格子预填）。
   int _formDay = 1;
   int _formStart = 1;
   int _formLen = 1;
-  WeekType _formWeek = WeekType.every;
+  // v1.42.0:周次四选(0=每周 1=单周 2=双周 3=指定起止周);起止文本
+  //   存 _wsCtrl/_weCtrl,提交时解析校验(1..30 且 起 ≤ 止)。
+  int _formWeekSel = 0;
   int _formColor = Course.autoColor('');
+
+  /// 四选下标 → 三态枚举(0-2;3=范围模式仅用于状态,week 落 every)。
+  static WeekType _weekSelToType(int sel) => switch (sel) {
+    1 => WeekType.odd,
+    2 => WeekType.even,
+    _ => WeekType.every,
+  };
 
   // ── 打开编辑弹窗（新增：预填 day/start）──
   void _openAdd(int day, int start) {
@@ -110,7 +108,9 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     _formDay = day;
     _formStart = start.clamp(1, _maxPeriod);
     _formLen = 1;
-    _formWeek = WeekType.every;
+    _formWeekSel = 0;
+    _wsCtrl.text = '1';
+    _weCtrl.text = '30';
     _formColor = Course.autoColor('');
     setState(() => _sheetOpen = true);
   }
@@ -123,9 +123,11 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     _formDay = c.day;
     _formStart = c.start;
     _formLen = c.len;
-    // v1.17.0：导入课程带具体周次（weeks）→ 三态选择器显示「每周」，
-    // 用户手动改 week 时保存会清空 weeks（见 _save）。
-    _formWeek = c.weeks.isNotEmpty ? WeekType.every : c.week;
+    // v1.42.0:weeks 非空(导入课/起止周课)→ 落到「指定起止周」模式并回显
+    //   起止;否则三态(历史:导入课被伪装成「每周」,改三态即静默丢数据)。
+    _formWeekSel = c.weeks.isNotEmpty ? 3 : c.week.index;
+    _wsCtrl.text = c.weeks.isNotEmpty ? '${c.weeks.first}' : '1';
+    _weCtrl.text = c.weeks.isNotEmpty ? '${c.weeks.last}' : '30';
     _formColor = c.colorValue;
     setState(() => _sheetOpen = true);
   }
@@ -137,7 +139,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     });
   }
 
-  /// 选择字段值更新（点击展开 → 选择 → 收起）。
+  /// 选择字段值更新（点击展开 → 选择 → 收起；起止周选中后保持展开）。
   void _selectField(String key, int index) {
     setState(() {
       switch (key) {
@@ -148,9 +150,9 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
         case 'len':
           _formLen = index + 1;
         case 'week':
-          _formWeek = WeekType.values[index];
+          _formWeekSel = index;
       }
-      _expandedPicker = null;
+      _expandedPicker = (key == 'week' && index == 3) ? 'week' : null;
     });
   }
 
@@ -158,6 +160,25 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
   Future<void> _save() async {
     final String name = _nameCtrl.text.trim();
     if (name.isEmpty) return;
+    // v1.42.0:指定起止周校验(1..30 且 起 ≤ 止)。
+    final bool rangeMode = _formWeekSel == 3;
+    final WeekType week = _weekSelToType(_formWeekSel);
+    final List<int> rangeWeeks;
+    if (rangeMode) {
+      final int? s = int.tryParse(_wsCtrl.text.trim());
+      final int? e = int.tryParse(_weCtrl.text.trim());
+      if (s == null ||
+          e == null ||
+          s < 1 ||
+          e > 30 ||
+          s > e) {
+        _showSnack('起止周无效:开始周需 ≤ 结束周(1-30)');
+        return;
+      }
+      rangeWeeks = <int>[for (int w = s; w <= e; w++) w];
+    } else {
+      rangeWeeks = const <int>[];
+    }
     final CourseListNotifier notifier = ref.read(courseListProvider.notifier);
     final Course? editing = _editing;
     if (editing == null) {
@@ -166,7 +187,8 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
         day: _formDay,
         start: _formStart,
         len: _formLen,
-        week: _formWeek,
+        week: week,
+        weeks: rangeWeeks,
         colorValue: _formColor,
         location: _locCtrl.text.trim().isEmpty ? null : _locCtrl.text.trim(),
         teacher: _teacherCtrl.text.trim().isEmpty
@@ -174,21 +196,21 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
             : _teacherCtrl.text.trim(),
       );
     } else {
-      // v1.17.0：手动改 week → 清空导入的具体周次（避免双语义冲突）。
-      final bool weekChanged = _formWeek != editing.week;
       await notifier.updateCourse(
         editing.copyWith(
           name: name,
           day: _formDay,
           start: _formStart,
           len: _formLen,
-          week: _formWeek,
+          week: week,
           colorValue: _formColor,
           location: _locCtrl.text.trim().isEmpty ? null : _locCtrl.text.trim(),
           teacher: _teacherCtrl.text.trim().isEmpty
               ? null
               : _teacherCtrl.text.trim(),
-          clearWeeks: weekChanged,
+          // 三态模式 → 清空导入/范围 weeks(避免双语义);范围模式 → 重写。
+          weeks: rangeMode ? rangeWeeks : null,
+          clearWeeks: !rangeMode,
         ),
       );
     }
@@ -259,19 +281,13 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     _gradeCtrl.dispose();
     _termCtrl.dispose();
     _weekCtrl.dispose();
-    _topBackdrop?.dispose();
+    _wsCtrl.dispose();
+    _weCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
     final MiuixColors colors = MiuixTheme.of(context).colors;
 
     return MiuixScaffold(
@@ -281,7 +297,6 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
         largeTitle: '大课表',
         navigationIcon: _backButton,
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         final List<Course> courses =
@@ -328,16 +343,11 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
             const SizedBox(height: 8),
           ],
         );
+        // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget listWithBg = ColoredBox(
           color: colors.surface,
           child: list,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : list;
         return Material(
           type: MaterialType.transparency,
           child: Stack(
@@ -349,7 +359,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
                   Expanded(
                     child: MiuixScrollBehaviorListener(
                       behavior: _collapse,
-                      child: captured,
+                      child: listWithBg,
                     ),
                   ),
                 ],
@@ -371,6 +381,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
     final int enabledCount = periods.where((ClassPeriod p) => p.enabled).length;
     // v1.25.0:整宽内容卡套统一阴影壳(radius 对齐 MiuixCard 16)。
+    // v1.44.x:暗色高光内建进 CardShadow。
     return CardShadow(
       radius: 16,
       child: MiuixCard(
@@ -933,8 +944,16 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-            // 单双周角标。
-            if (c.week != WeekType.every)
+            // 周次角标(v1.42.0:具体周次如 2-18;三态单/双周;每周无角标)。
+            if (c.weeks.isNotEmpty)
+              MiuixText(
+                '第${Course.weeksLabel(c.weeks)}周',
+                style: textStyles.body2.copyWith(fontSize: 10),
+                color: const Color(0xFFFFFFFF).withValues(alpha: 0.85),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            else if (c.week != WeekType.every)
               MiuixText(
                 Course.weekLabel(c.week),
                 style: textStyles.body2.copyWith(fontSize: 10),
@@ -996,14 +1015,17 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
                 textStyles: textStyles,
               ),
               const SizedBox(height: 12),
-              // 周次（点击展开选择 每周/单周/双周）。
+              // 周次（每周/单周/双周/指定起止周;v1.42.0 起止周编辑）。
               _pickerField(
                 key: 'week',
                 label: '周次',
-                options: const <String>['每周', '单周', '双周'],
-                selectedIndex: _formWeek.index,
+                options: const <String>['每周', '单周', '双周', '指定起止周'],
+                selectedIndex: _formWeekSel,
                 colors: colors,
                 textStyles: textStyles,
+                trailing: _expandedPicker == 'week' && _formWeekSel == 3
+                    ? _buildWeekRangeEditor(colors, textStyles)
+                    : null,
               ),
               const SizedBox(height: 12),
               // 颜色选择（auto + 7 预设）。
@@ -1071,7 +1093,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     );
   }
 
-  /// 点击展开的选择字段（值行 + 箭头；展开显示胶囊选项 Wrap）。
+  /// 点击展开的选择字段（值行 + 箭头；展开显示胶囊选项 Wrap + 附加区）。
   /// 轻量实现：仅当前展开字段重建，无弹层/Overlay（兼顾性能）。
   Widget _pickerField({
     required String key,
@@ -1080,6 +1102,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     required int selectedIndex,
     required MiuixColors colors,
     required MiuixTextStyles textStyles,
+    Widget? trailing,
   }) {
     final bool expanded = _expandedPicker == key;
     return Column(
@@ -1133,7 +1156,59 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
               ],
             ),
           ),
+        // v1.42.0:展开附加区(「指定起止周」选中时显示起止输入)。
+        if (expanded && trailing != null) trailing,
       ],
+    );
+  }
+
+  /// 起止周编辑区：开始周 / 结束周 数字输入(1..30,提交校验起 ≤ 止)。
+  Widget _buildWeekRangeEditor(
+    MiuixColors colors,
+    MiuixTextStyles textStyles,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: MiuixTextField(
+                  key: const ValueKey('timetable.weekStart'),
+                  controller: _wsCtrl,
+                  label: '开始周',
+                  singleLine: true,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(width: 10),
+              MiuixText(
+                '至',
+                style: textStyles.body1,
+                color: colors.onSurfaceVariantSummary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: MiuixTextField(
+                  key: const ValueKey('timetable.weekEnd'),
+                  controller: _weCtrl,
+                  label: '结束周',
+                  singleLine: true,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          MiuixText(
+            '课程仅在指定周次范围内显示(1-30,如 2-18)',
+            style: textStyles.footnote1,
+            color: colors.onSurfaceVariantSummary,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1176,7 +1251,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     'day' => index == _formDay - 1,
     'start' => index == _formStart - 1,
     'len' => index == _formLen - 1,
-    'week' => index == _formWeek.index,
+    'week' => index == _formWeekSel,
     _ => false,
   };
 

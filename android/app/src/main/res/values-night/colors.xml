@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v1.44.x 原生启动屏背景色（深色主题；近似 Miuix 深色 surface）。 -->
+    <color name="splash_background">#FF121212</color>
+</resources>

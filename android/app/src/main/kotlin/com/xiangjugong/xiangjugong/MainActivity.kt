@@ -88,6 +88,11 @@ class MainActivity : FlutterActivity() {
                             id,
                             call.argument<String>("title") ?: "课程提醒",
                             call.argument<String>("body") ?: "",
+                            // v1.40.1(C 方案):课程闹钟携带常驻参数(到点原生直启
+                            // 倒计时);Number 兼容 Integer/Long 解码(小值坑)。
+                            endAtMillis = call.argument<Number>("endAtMillis")?.toLong() ?: 0L,
+                            totalMinutes = call.argument<Number>("totalMinutes")?.toInt() ?: 0,
+                            endText = call.argument<String>("endText"),
                         )
                         result.success(null)
                     }

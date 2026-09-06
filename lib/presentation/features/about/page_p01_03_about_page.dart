@@ -1,5 +1,6 @@
 // lib/presentation/features/about/page_p01_03_about_page.dart
 // 编号：P-01-03 关于页（F-04 关于模块）
+// v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
 // 🔧 修改（v1.4.2 / T22）：接入 C-23 内容推动折叠标题栏（与首页/设置页交互统一），
 //   顶栏为 CustomScrollView 首个 sliver（大标题"关于"左对齐 1:1 上移消失、
 //   小标题"关于"折叠居中滑入）；内容改 SliverList 惰性构建。
@@ -14,15 +15,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
@@ -43,30 +41,10 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
     onTap: () => Navigator.of(context).maybePop(),
   );
 
-  // ── C-25（v1.12.3）：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  /// 页面级顶部快照（U-03 门控创建/释放；null = 降级纯 surface）。
-  MiuixLayerBackdrop? _topBackdrop;
-
+  // ── C-25（v1.12.3）：折叠滚动行为（v1.42.0 起纯折叠，无快照采样）──
   /// 顶部折叠滚动行为（MiuixTopAppBar + MiuixScrollBehaviorListener 联动）。
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
-
-  /// U-03 裁决创建/释放顶部快照（build 中调用，幂等）。
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    // ⚡ 功耗优化：顶部快照释放。
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,14 +56,6 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
         : 0.0;
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
-    // v1.12.3（C-25）：顶部毛玻璃 U-03 裁决 + 快照幂等同步。
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
 
     // v1.12.3：移除 TickerMode(false) —— MiuixTopAppBar 内部有小标题弹簧
     //   AnimationController，静音会冻结折叠动画；滚动量 = 折叠量纯函数，
@@ -96,12 +66,11 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
         title: '关于',
         largeTitle: '关于',
         navigationIcon: _backButton,
-        actions: <Widget>[
+        actions: const <Widget>[
           // v1.13.0（C-26）：顶部更多菜单。
-          C26MoreMenu(backdrop: _topBackdrop),
+          C26MoreMenu(),
         ],
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         // v1.12.3：内容避让顶栏；快照画 surface 底色 + 采样 6 帧。
@@ -199,12 +168,6 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
           color: colors.surface,
           child: list,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : list;
         return Material(
           type: MaterialType.transparency,
           // 🔧 v1.0.7（布局稳定性）：Column + MainAxisAlignment.start 强制顶格。
@@ -216,7 +179,7 @@ class _PageP0103AboutPageState extends ConsumerState<PageP0103AboutPage> {
                 // v1.12.3：MiuixScrollBehaviorListener 桥接滚动折叠。
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
             ],

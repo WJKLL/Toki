@@ -16,18 +16,12 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/utils/u03_blur_policy.dart';
-import '../../../core/widgets/app_icons.dart';
 import '../../../domain/entities/tool_config.dart';
-import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../providers/tool_items_provider.dart';
-import '../../widgets/c21_collapsing_title_bar.dart';
-import '../../widgets/c22_backdrop_heartbeat.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
-import '../../widgets/c28_downsampled_capture.dart';
 import '../../widgets/c42_tool_category_panel.dart';
 
 /// 工具页分组内边距(与 C03 组卡外边距一致,面板对齐卡片边缘)。
@@ -41,45 +35,14 @@ class PageP0104ToolsPage extends ConsumerStatefulWidget {
 }
 
 class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
-  /// 顶栏按钮（build 外定义；一级页 leading 菜单占位）。
-  late final Widget _navigationIcon = C21CapsuleIconButton(
-    key: const ValueKey('tools.navigation'),
-    icon: appIcon('sidebar'),
-    tooltip: '菜单',
-    onTap: _noop,
-  );
+  // v1.44.0(UI)：左上角不再放占位假按钮,与待办页统一。
 
-  static void _noop() {}
-
-  // ── C-25：顶部毛玻璃快照源 + 折叠滚动行为 ──
-  MiuixLayerBackdrop? _topBackdrop;
+  // ── C-25：顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无页面级快照采样)──
   final MiuixExitUntilCollapsedScrollBehavior _collapse =
       MiuixExitUntilCollapsedScrollBehavior();
 
-  void _syncTopBackdrop(bool enabled) {
-    if (enabled && _topBackdrop == null) {
-      _topBackdrop = MiuixLayerBackdrop();
-    } else if (!enabled && _topBackdrop != null) {
-      _topBackdrop!.dispose();
-      _topBackdrop = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    _topBackdrop?.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool topBlurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: ref.watch(appSettingsProvider.select((s) => s.blurEnabled)),
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    _syncTopBackdrop(topBlurAllowed);
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled
@@ -91,13 +54,11 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
       topBar: C25FrostedTopBar(
         title: '工具',
         largeTitle: '工具集',
-        navigationIcon: _navigationIcon,
-        actions: <Widget>[
+        actions: const <Widget>[
           // C-26 顶部更多菜单（设置/关于入口）。
-          C26MoreMenu(backdrop: _topBackdrop),
+          C26MoreMenu(),
         ],
         scrollBehavior: _collapse,
-        backdrop: _topBackdrop,
       ),
       content: (padding) {
         final Widget list = ListView(
@@ -121,16 +82,11 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
             ],
           ],
         );
+        // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget listWithBg = ColoredBox(
           color: colors.surface,
           child: list,
         );
-        final Widget captured = _topBackdrop != null
-            ? C28DownsampledCapture(
-                backdrop: _topBackdrop!,
-                child: CaptureHeartbeat(everyNFrames: 4, child: listWithBg),
-              )
-            : list;
         return Material(
           type: MaterialType.transparency,
           child: Column(
@@ -140,7 +96,7 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
               Expanded(
                 child: MiuixScrollBehaviorListener(
                   behavior: _collapse,
-                  child: captured,
+                  child: listWithBg,
                 ),
               ),
             ],

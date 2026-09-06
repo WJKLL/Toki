@@ -26,6 +26,11 @@ object ReminderScheduler {
     const val EXTRA_TITLE = "xtitle"
     const val EXTRA_BODY = "xbody"
     const val EXTRA_ID = "xid"
+    // v1.40.1(C 方案):闹钟携带常驻参数 —— 到点广播直接原生启动倒计时前台
+    // 服务(不依赖 Dart 进程),App 被杀也能出现常驻通知。
+    const val EXTRA_END_AT = "endAtMillis"
+    const val EXTRA_TOTAL = "totalMinutes"
+    const val EXTRA_END_TEXT = "endText"
     const val ACTION_REMINDER = "com.xiangjugong.xiangjugong.REMINDER"
 
     /** 诊断：Receiver 最近一次被系统广播唤醒的时间（任何广播到达即记）。 */
@@ -78,13 +83,27 @@ object ReminderScheduler {
         )
     }
 
-    /** 到点广播 PendingIntent（id 稳定 → 重复排同 id = 覆盖去重）。 */
-    private fun alarmIntent(context: Context, id: Int, title: String?, body: String?): PendingIntent {
+    /** 到点广播 PendingIntent（id 稳定 → 重复排同 id = 覆盖去重）。
+     * extra 不参与 PendingIntent 匹配(cancel 可只按 id 命中)。 */
+    private fun alarmIntent(
+        context: Context,
+        id: Int,
+        title: String?,
+        body: String?,
+        endAtMillis: Long = 0L,
+        totalMinutes: Int = 0,
+        endText: String? = null,
+    ): PendingIntent {
         val i = Intent(context, ReminderReceiver::class.java).apply {
             action = "$ACTION_REMINDER.$id"
             if (title != null) putExtra(EXTRA_TITLE, title)
             if (body != null) putExtra(EXTRA_BODY, body)
             putExtra(EXTRA_ID, id)
+            if (endAtMillis > 0L) {
+                putExtra(EXTRA_END_AT, endAtMillis)
+                putExtra(EXTRA_TOTAL, totalMinutes.coerceAtLeast(1))
+                if (endText != null) putExtra(EXTRA_END_TEXT, endText)
+            }
         }
         return PendingIntent.getBroadcast(
             context, id, i,
@@ -96,6 +115,8 @@ object ReminderScheduler {
      * 排一个「到点提醒」精确闹钟，并把条目写入持久化清单（供开机/兜底重排）。
      * 精确闹钟权限不可用（部分系统/Android 14 默认拒绝且豁免失效）→ 降级
      * 普通 set（仍会触发，只是不保证精确到秒/Doze 内可能延迟）。
+     * [endAtMillis]/[totalMinutes]/[endText] 仅课程闹钟携带（v1.40.1：到点
+     * 后原生直启倒计时常驻，App 不在也出现）。
      */
     fun scheduleAlert(
         context: Context,
@@ -103,9 +124,16 @@ object ReminderScheduler {
         id: Int,
         title: String,
         body: String,
+        endAtMillis: Long = 0L,
+        totalMinutes: Int = 0,
+        endText: String? = null,
     ) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        setExactSafe(am, atMillis, alarmIntent(context, id, title, body))
+        setExactSafe(
+            am,
+            atMillis,
+            alarmIntent(context, id, title, body, endAtMillis, totalMinutes, endText),
+        )
         // 持久化条目（upsert）。
         val list = readAlarmList(context)
         val next = JSONArray()
@@ -113,26 +141,36 @@ object ReminderScheduler {
         for (i in 0 until list.length()) {
             val o = list.optJSONObject(i) ?: continue
             if (o.optInt("id") == id) {
-                next.put(JSONObject().apply {
-                    put("id", id)
-                    put("at", atMillis)
-                    put("title", title)
-                    put("body", body)
-                })
+                next.put(alarmJson(id, atMillis, title, body, endAtMillis, totalMinutes, endText))
                 found = true
             } else {
                 next.put(o)
             }
         }
         if (!found) {
-            next.put(JSONObject().apply {
-                put("id", id)
-                put("at", atMillis)
-                put("title", title)
-                put("body", body)
-            })
+            next.put(alarmJson(id, atMillis, title, body, endAtMillis, totalMinutes, endText))
         }
         prefs(context).edit().putString(KEY_ALARMS, next.toString()).apply()
+    }
+
+    private fun alarmJson(
+        id: Int,
+        at: Long,
+        title: String,
+        body: String,
+        endAtMillis: Long,
+        totalMinutes: Int,
+        endText: String?,
+    ): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("at", at)
+        put("title", title)
+        put("body", body)
+        if (endAtMillis > 0L) {
+            put("endAtMillis", endAtMillis)
+            put("totalMinutes", totalMinutes.coerceAtLeast(1))
+            if (endText != null) put("endText", endText)
+        }
     }
 
     /**
@@ -200,7 +238,15 @@ object ReminderScheduler {
             setExactSafe(
                 am,
                 at,
-                alarmIntent(context, o.optInt("id"), o.optString("title"), o.optString("body")),
+                alarmIntent(
+                    context,
+                    o.optInt("id"),
+                    o.optString("title"),
+                    o.optString("body"),
+                    o.optLong("endAtMillis", 0L),
+                    o.optInt("totalMinutes", 0),
+                    if (o.has("endText")) o.optString("endText") else null,
+                ),
             )
         }
     }

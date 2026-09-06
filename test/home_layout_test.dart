@@ -13,11 +13,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xiangjugong/core/constants/app_constants.dart';
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/features/home/page_p01_01_home_page.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
+import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 import 'package:xiangjugong/presentation/widgets/c21_collapsing_title_bar.dart';
 import 'package:xiangjugong/presentation/widgets/c24_frosted_fab.dart';
 import 'package:xiangjugong/presentation/widgets/c26_more_menu.dart';
@@ -48,11 +50,16 @@ void main() {
           agreementRepositoryProvider.overrideWithValue(
             AgreementRepositoryImpl(prefs),
           ),
+          // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
+          todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
         ],
         child: const XiangJuGongApp(),
       ),
     );
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    // v1.43.0：初始落首页(page=1)由深链 jumpToPage 触发 ScrollEnd →
+    // S-16 高刷释放 3s Timer，需消化避免 Pending timers。
+    await tester.pump(const Duration(seconds: 4));
     return repository;
   }
 
@@ -85,33 +92,24 @@ void main() {
     // ✨ v1.3.0（T9）/ v1.3.3（T18）/ v1.4.0（C-23）：胶囊按钮 —— 展开态 1 左 +
     //   3 右共 4 个;v1.13.0 起右侧仅保留 C-26 更多菜单 → 1 左 + 1 右 = 2 个;
     //   v1.32.1 C-26 触发器改裸图标(MiuixIcon,组件内 IconButton 热区)→ 胶囊仅导航。
+    //   v1.44.0(UI)：左上占位导航胶囊移除(无功能) → 0 胶囊,仅 C-26 菜单。
     expect(
       find.byType(C21CapsuleIconButton),
-      findsOneWidget,
-      reason: '✅ 验证通过：展开态顶栏胶囊按钮仅剩左侧导航（v1.32.1 C-26 裸图标）',
+      findsNothing,
+      reason: '✅ 验证通过：左上角占位胶囊按钮已移除（v1.44.0 UI 统一）',
     );
     expect(
       find.byType(C26MoreMenu),
       findsOneWidget,
       reason: '✅ 验证通过：展开态顶栏 C-26 更多菜单存在',
     );
-    expect(
-      find.byKey(const ValueKey('c21.navigation')),
-      findsOneWidget,
-      reason: '✅ 验证通过：左侧菜单按钮存在',
-    );
 
-    // ✨ v1.5.0（T28）：C-24 毛玻璃 FAB 存在且可点击（占位回调无异常）。
+    // v1.49.0：占位「+」FAB 已删除 —— 断言首页不再出现(防占位钮复活)。
     expect(
       find.byType(C24FrostedFab),
-      findsOneWidget,
-      reason: '✅ 验证通过：首页右下角 FAB 存在',
+      findsNothing,
+      reason: '✅ 验证通过：首页无占位 FAB(已删除)',
     );
-    // 点击按钮无报错（占位空回调）。FAB 悬浮于顶栏快照层之下,命中目标
-    // 常落在上层遮罩 —— 此处仅验证点击回调不抛异常(warnIfMissed 关闭)。
-    await tester.tap(find.byType(C24FrostedFab), warnIfMissed: false);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(tester.takeException(), isNull, reason: '✅ 验证通过：点击 FAB 无异常');
 
     // 场景 2（T17）：C-23 折叠验证 —— 向下滚动后 header 收起（大标题上移消失、
     //   小标题滑入），首内容上移。
@@ -131,22 +129,17 @@ void main() {
       reason: '✅ C-23 折叠验证：滚动后 header 收起，内容必须上移',
     );
 
-    // 折叠态：左侧导航胶囊 + C-26 更多菜单仍可见（按钮行常驻顶部）。
+    // 折叠态：C-26 更多菜单仍可见（按钮行常驻顶部）；无占位胶囊。
     expect(
       find.byType(C21CapsuleIconButton),
-      findsOneWidget,
-      reason: '✅ 验证通过：折叠态导航胶囊仍可见（按钮行常驻）',
+      findsNothing,
+      reason: '✅ 验证通过：折叠态无占位胶囊按钮',
     );
     expect(
       find.byType(C26MoreMenu),
       findsOneWidget,
       reason: '✅ 验证通过：折叠态 C-26 更多菜单仍可见',
     );
-
-    // 点击按钮无报错（占位空回调）。
-    await tester.tap(find.byType(C21CapsuleIconButton).first);
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(tester.takeException(), isNull, reason: '✅ 验证通过：点击胶囊按钮无异常');
 
     // 场景 3：进入设置页再返回主页 → 布局不变。
     // 🔧 复活适配(v1.26.0):push 后旧 shell context 已 deactivated,
@@ -181,6 +174,9 @@ void main() {
       reason: '🔧 布局稳定性：转回竖屏后首页仍顶格',
     );
 
+    // v1.43.0：布局切换(旋转)重建 PageView → 帧后校正 jump 触发 ScrollEnd →
+    // S-16 高刷释放 3s Timer，需消化避免 Pending timers。
+    await tester.pump(const Duration(seconds: 4));
     repository.dispose();
   });
 }

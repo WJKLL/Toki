@@ -55,11 +55,6 @@ android/.gradle/
 # Android æ„å»ºäº§ç‰©æŠ¥å‘Š
 /android/build/
 
-# Release °²×°°ü(´ó¶ş½øÖÆ²»Èë¿â,×ß GitHub Release ¸½¼ş)
-/release/
-
-
-# ¿ª·¢¸¨Öú(»á»°/IDE ÅäÖÃ,²»¿ªÔ´)
-/.agents/
-/.claude/
-
+# æœ¬åœ°æµ‹è¯•æ„å»ºä¸å‘å¸ƒäº§ç‰©(ä¸å…¥åº“)
+_test_builds/
+_release/
