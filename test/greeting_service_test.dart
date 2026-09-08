@@ -24,8 +24,15 @@ void main() {
     expect(at(DateTime(2026, 3, 20, 12)).greetingFor(), '今日春分');
   });
 
-  test('节气容差窗口(2026-03-21)仍命中(日期表精度容差)', () {
-    expect(at(DateTime(2026, 3, 21, 12)).greetingFor(), '今日春分');
+  test('节气次日(2026-03-21,春分已过)回落时段——修复「停留今日春分/白露」', () {
+    final String text = at(DateTime(2026, 3, 21, 12)).greetingFor();
+    // v1.49.3：节气日已过不再输出「今日X」（如 9/8 显示今日白露）。
+    expect(text, isNot(contains('春分')));
+    expect(text, contains('午'));
+  });
+
+  test('节气前一日(2026-03-19)先报「明日春分」(±1 容差前向吸收)', () {
+    expect(at(DateTime(2026, 3, 19, 12)).greetingFor(), '明日春分');
   });
 
   test('普通日按时段(2026-04-10 上午)', () {

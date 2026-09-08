@@ -12,7 +12,8 @@
 //     可自动降到低刷新率省电；帧来源 = 页面内容自身的重绘（滚动/动画/切换），
 //     内容静止 → 无帧 → 零采样、零开销；
 //   - 采样节流：内容每 [everyNFrames] 帧触发一次捕获节点重绘（采样），
-//     采样率跟随内容帧率（内容 120Hz → 120/N Hz，N=3 → 40Hz）；
+//     采样率跟随内容帧率（内容 60Hz → 60/N Hz，N 由档位决定：滚动 4、
+//     切页 16、静止 4；σ≈12 毛玻璃下低采样观感无差）。
 //   - 非采样帧仅做一次计数递增（零 rebuild、零 paint），页面内容（PageView）
 //     不在心跳 CustomPaint 子树内，页面刷新率不受影响。
 import 'package:flutter/scheduler.dart';
@@ -32,11 +33,17 @@ import '../providers/scroll_activity_provider.dart';
 /// [activeEveryNFrames]（默认 2 帧，快照跟手、消除拖影）；静止用
 /// [everyNFrames]（默认 4 帧，省电）。静止无内容帧 → 心跳本就停，静止档
 /// 仅在播放动画（如折叠标题）时体现。内容滚动期间 60Hz → 30Hz 采样。
+/// v1.49.2（切页性能诊断结果）：活动档 2→4（60Hz 内容 15Hz 采样）——毛玻璃
+///   σ≈12 高斯会抹平帧间差异，15Hz 观感与 30Hz 几乎一致，而 toImageSync
+///   全页快照成本减半（剖面数据：raster 为切页卡顿主凶，见 faqs-performance-1）；
+///   切换档（程序化切页）由宿主传 16，同样减半且无跳变补帧。
 class CaptureHeartbeat extends ConsumerStatefulWidget {
   const CaptureHeartbeat({
     super.key,
     this.everyNFrames = 4,
-    this.activeEveryNFrames = 2,
+    this.activeEveryNFrames = 4,
+    this.switchingEveryNFrames,
+    this.switching = false,
     required this.child,
   });
 
@@ -44,9 +51,16 @@ class CaptureHeartbeat extends ConsumerStatefulWidget {
   /// 仅滚动/切页外动画生效；滚动中用 [activeEveryNFrames]）。
   final int everyNFrames;
 
-  /// 活动档（滚动/切页中）采样节流：每 N 帧一次。默认 2 → 快照更新
-  /// 频率 = 内容帧率/2（60Hz 内容 30Hz 采样），滚动跟手不拖影。
+  /// 活动档（滚动/切页中）采样节流：每 N 帧一次。默认 4 → 快照更新
+  /// 频率 = 内容帧率/4（60Hz 内容 15Hz 采样）；σ≈12 毛玻璃下观感与
+  /// 30Hz 几乎一致（v1.49.2 自 2 下调，toImageSync 快照成本减半）。
   final int activeEveryNFrames;
+
+  /// 切换档（程序化切页动画期间）采样节流：null = 不启用；与 [switching] 配合。
+  final int? switchingEveryNFrames;
+
+  /// 页面切换动画进行中（程序化切页；由宿主传入）→ 降采样省帧。
+  final bool switching;
 
   /// 被捕获的页面内容（普通子树，不随心跳重建）。
   final Widget child;
@@ -72,10 +86,16 @@ class _CaptureHeartbeatState extends ConsumerState<CaptureHeartbeat> {
     super.dispose();
   }
 
-  /// 当前生效采样档位：活动（滚动/切页）用活动档，否则静止档。
-  int get _effectiveN => ref.read(scrollActivityProvider)
-      ? widget.activeEveryNFrames
-      : widget.everyNFrames;
+  /// 当前生效采样档位：切换动画中优先用切换档；否则活动（滚动/切页）用
+  /// 活动档，再否则静止档。
+  int get _effectiveN {
+    if (widget.switching && widget.switchingEveryNFrames != null) {
+      return widget.switchingEveryNFrames!;
+    }
+    return ref.read(scrollActivityProvider)
+        ? widget.activeEveryNFrames
+        : widget.everyNFrames;
+  }
 
   /// 每帧结束回调（由内容重绘驱动的帧触发）：递增计数，命中节流的帧
   /// setState 触发捕获节点重绘（采样）。**不主动调度下一帧** —— 下一帧

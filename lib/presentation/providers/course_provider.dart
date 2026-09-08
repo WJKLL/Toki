@@ -245,7 +245,7 @@ final currentClassProvider = Provider<CurrentClass?>((ref) {
   Course? course;
   for (final Course c in courses) {
     if (c.day != weekday) continue;
-    if (!c.showsOn(meta.week)) continue;
+    if (!c.showsOn(meta.effectiveWeek())) continue;
     if (periodNo >= c.start && periodNo < c.start + c.len) {
       course = c;
       break;
@@ -308,7 +308,7 @@ Course? _todayCourseAt(
 ) {
   for (final Course c in courses) {
     if (c.day != weekday) continue;
-    if (!c.showsOn(meta.week)) continue;
+    if (!c.showsOn(meta.effectiveWeek())) continue;
     if (periodNo >= c.start && periodNo < c.start + c.len) return c;
   }
   return null;

@@ -12,9 +12,9 @@ import 'dart:async' show Timer, unawaited;
 import 'dart:convert' show utf8;
 import 'dart:typed_data' show Uint8List;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
+import 'package:flutter/material.dart' show Material, MaterialType;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,10 +25,12 @@ import '../../../core/flow/flow_clipboard.dart';
 import '../../../core/flow/flow_connect_rules.dart';
 import '../../../core/flow/legacy_flow_migrator.dart';
 import '../../../core/logging/app_log_service.dart';
+import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../../domain/entities/flow_doc.dart';
 import '../../../domain/entities/todo_item.dart';
+import '../../../domain/repositories/todo_repository.dart';
 import '../../providers/todo_providers.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
 import '../../widgets/c48_flow_toolbar_v2.dart';
@@ -77,6 +79,9 @@ class _PageP11V2FlowEditorPageState
 
   /// 缩略图/LOD/图例(阶段2)。
   bool _showMiniMap = false;
+
+  /// 宽屏右栏(预览窗)显隐开关(工具箱「预览窗」切换,默认开)。
+  bool _showPreview = true;
   bool _lodOn = false;
   bool _legendOpen = false;
 
@@ -114,6 +119,9 @@ class _PageP11V2FlowEditorPageState
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _noteCtrl = TextEditingController();
   final TextEditingController _labelCtrl = TextEditingController();
+
+  /// 兜底落盘仓储缓存(dispose 中禁止 ref 访问 —— 预读于此)。
+  TodoRepository? _todoRepo;
 
   /// 弹层编辑临时态(打开时初始化,应用时写入)。
   bool _nodeLock = false;
@@ -173,6 +181,13 @@ class _PageP11V2FlowEditorPageState
     // (vyuh 内建 copy/paste 未实现;Delete/全选等由编辑器内建处理)。
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // dispose 中禁止 ref 访问(元素 deactivate 后抛)——仓储预读缓存。
+    _todoRepo ??= ref.read(todoRepositoryProvider);
   }
 
   /// 桌面快捷键(Ctrl/Meta + Z/Y/C/V/X);返回 true = 已消费(不再进
@@ -433,10 +448,10 @@ class _PageP11V2FlowEditorPageState
       if (doc.nodes.isNotEmpty ||
           doc.edges.isNotEmpty ||
           (_doc?.nodes.isNotEmpty ?? false)) {
+        // dispose 中禁止 ref 访问(元素已 deactivate 会抛)——
+        // 仓储在 didChangeDependencies 预读缓存。
         unawaited(
-          ref
-              .read(todoRepositoryProvider)
-              .saveFlowchart(widget.taskId, doc.toJson()),
+          _todoRepo?.saveFlowchart(widget.taskId, doc.toJson()),
         );
       }
     }
@@ -476,6 +491,14 @@ class _PageP11V2FlowEditorPageState
           ),
           widgetBuilder: buildLaneNodeCard,
         ),
+      );
+      // DSH-OH fix:泳道同样写 _meta(新建后点击详情才能打开)。
+      _meta[id] = ctrl.nodes[id]?.data ?? FlowNodeData(
+        id: id,
+        kind: kind,
+        dx: pos.dx,
+        dy: pos.dy,
+        title: kind.defaultLabel(seq),
       );
       _scheduleSave();
       return;
@@ -521,6 +544,9 @@ class _PageP11V2FlowEditorPageState
       ),
     );
     ctrl.addNode(node);
+    // DSH-OH fix:新节点写入 _meta —— 否则 _openNodeSheet 因 _meta[id]==null
+    //   直接 return,新建节点详情永不显示(连线不依赖 _meta 故可用)。
+    _meta[id] = node.data;
     _scheduleSave();
   }
 
@@ -915,6 +941,9 @@ class _PageP11V2FlowEditorPageState
 
   void _toggleMiniMap() => setState(() => _showMiniMap = !_showMiniMap);
 
+  /// 预览窗(宽屏右栏)显隐切换。
+  void _togglePreview() => setState(() => _showPreview = !_showPreview);
+
   void _toggleLod() {
     setState(() => _lodOn = !_lodOn);
     _ctrl?.lod?.setEnabled(_lodOn);
@@ -952,13 +981,10 @@ class _PageP11V2FlowEditorPageState
       dataFor: (String id) => _meta[id] ?? _fallbackNodeData(id, c),
     );
     final String html = const FlowHtmlExporter().export(doc.toJson());
-    final Uri? saved;
+    final String? saved;
     try {
-      saved = await FilePicker.saveFile(
-        dialogTitle: '保存流程图演示文件',
+      saved = await PlatFileOpsRegistry.instance.saveFile(
         fileName: '流程图.html',
-        type: FileType.custom,
-        allowedExtensions: const <String>['html'],
         bytes: Uint8List.fromList(utf8.encode(html)),
       );
     } catch (e) {
@@ -1342,7 +1368,12 @@ class _PageP11V2FlowEditorPageState
     final FlowDoc? doc = _doc;
     // 宽屏/横屏(≥700):三段式(左 docked 工具 · 中画布 · 右详情)。
     final bool wide = MediaQuery.sizeOf(context).width >= 700;
-    return MiuixScaffold(
+    // DSH-OH fix(可回灌主项目):页面根包 Material —— 项目惯例(home/todo/settings 等同款),
+    // 编辑器页漏包致 TextField(MiuixTextField 详情/vyuh 画布编辑)找不到 Material ancestor
+    // 报错,错误横幅叠在顶部形成"遮挡功能区"观感。
+    return Material(
+      type: MaterialType.transparency,
+      child: MiuixScaffold(
       contentWindowInsets: EdgeInsets.zero,
       topBar: MiuixSmallTopAppBar(
         title: _taskTitle(),
@@ -1361,49 +1392,58 @@ class _PageP11V2FlowEditorPageState
                     const SizedBox(width: 12),
                     Expanded(child: canvasStack),
                     // 右栏分隔条(桌面 hover 光标;拖拽调宽)。
-                    _buildRightDivider(context),
-                    SizedBox(
-                      width: _rightPanelWidth,
-                      child: _buildRightPanel(context),
-                    ),
+                    if (_showPreview) ...<Widget>[
+                      _buildRightDivider(context),
+                      SizedBox(
+                        width: _rightPanelWidth,
+                        child: _buildRightPanel(context),
+                      ),
+                    ],
                   ],
                 ),
               );
-        return Stack(
-          children: <Widget>[
-            body,
-            // 窄屏:节点详情/连线样式走弹层;宽屏走右栏(不弹)。
-            if (!wide) ...<Widget>[
+        // DSH-OH fix(方案 A):应用 MiuixScaffold 回传的 contentPadding(顶部=topBar
+        // 高度,含状态栏 inset)。此前漏用导致 body 铺满 Offset.zero、顶部被上浮的
+        // MiuixSmallTopAppBar 覆盖,横屏三段式顶部内容(工具栏/节点)被压"一条"。
+        return Padding(
+          padding: padding,
+          child: Stack(
+            children: <Widget>[
+              body,
+              // 窄屏:节点详情/连线样式走弹层;宽屏走右栏(不弹)。
+              if (!wide) ...<Widget>[
+                MiuixOverlayDialog(
+                  show: _nodeSheetId != null,
+                  title: '节点详情',
+                  onDismissRequest: () => setState(() => _nodeSheetId = null),
+                  content: _buildNodeSheet(),
+                ),
+                MiuixOverlayDialog(
+                  show: _connSheetId != null,
+                  title: '连线样式',
+                  onDismissRequest: () => setState(() => _connSheetId = null),
+                  content: _buildConnSheet(),
+                ),
+              ],
+              // 播放分支选路(判断多出口;两模式都弹)。
               MiuixOverlayDialog(
-                show: _nodeSheetId != null,
-                title: '节点详情',
-                onDismissRequest: () => setState(() => _nodeSheetId = null),
-                content: _buildNodeSheet(),
+                show: _branchOpen,
+                title: '选择分支',
+                onDismissRequest: () => setState(() => _branchOpen = false),
+                content: _buildBranchSheet(),
               ),
+              // 图例(阶段2:节点语义/泳道/连线说明)。
               MiuixOverlayDialog(
-                show: _connSheetId != null,
-                title: '连线样式',
-                onDismissRequest: () => setState(() => _connSheetId = null),
-                content: _buildConnSheet(),
+                show: _legendOpen,
+                title: '图例',
+                onDismissRequest: () => setState(() => _legendOpen = false),
+                content: _buildLegendSheet(),
               ),
             ],
-            // 播放分支选路(判断多出口;两模式都弹)。
-            MiuixOverlayDialog(
-              show: _branchOpen,
-              title: '选择分支',
-              onDismissRequest: () => setState(() => _branchOpen = false),
-              content: _buildBranchSheet(),
-            ),
-            // 图例(阶段2:节点语义/泳道/连线说明)。
-            MiuixOverlayDialog(
-              show: _legendOpen,
-              title: '图例',
-              onDismissRequest: () => setState(() => _legendOpen = false),
-              content: _buildLegendSheet(),
-            ),
-          ],
+          ),
         );
       },
+      ),
     );
   }
 
@@ -1471,6 +1511,8 @@ class _PageP11V2FlowEditorPageState
       onPlay: _togglePlay,
       onExportHtml: _exportHtml,
       onToggleMiniMap: _toggleMiniMap,
+      onTogglePreview: _togglePreview,
+      previewOn: _showPreview,
       onToggleLod: _toggleLod,
       canUndo: _undo.isNotEmpty,
       canRedo: _redo.isNotEmpty,

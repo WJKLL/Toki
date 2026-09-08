@@ -236,7 +236,12 @@ class Course {
 
 /// 学期信息（年级 / 学期 / 当前周次，参考勾丰小站 sched-meta）。
 class ScheduleMeta {
-  const ScheduleMeta({this.grade = '', this.term = 1, this.week = 1});
+  const ScheduleMeta({
+    this.grade = '',
+    this.term = 1,
+    this.week = 1,
+    this.weekStartDate = '',
+  });
 
   /// 年级（如「大二」）。
   final String grade;
@@ -244,14 +249,38 @@ class ScheduleMeta {
   /// 学期（1..8）。
   final int term;
 
-  /// 当前周次（1..30）。
+  /// 当前周次（1..30）—— 无起始日时为手填值;有起始日时由 [effectiveWeek] 派生。
   final int week;
 
-  ScheduleMeta copyWith({String? grade, int? term, int? week}) {
+  /// 第一周起始日（"yyyy-MM-dd"）;空串 = 手动周次模式。
+  /// v1.49.3:设起始日后,【当前周次】随日期自动推算(跨自然周自动 +1)。
+  final String weekStartDate;
+
+  /// 自动周次:有起始日时按当天派生（第 1 周 = 起始日所在 7 天窗口,
+  ///   之后每过 7 天 +1;跨年/月中自然成立）;否则回落到手填 [week]。
+  int effectiveWeek([DateTime? now]) {
+    if (weekStartDate.isEmpty) return week;
+    final DateTime? start = DateTime.tryParse(weekStartDate);
+    if (start == null) return week;
+    final DateTime ref = now ?? DateTime.now();
+    final DateTime today = DateTime(ref.year, ref.month, ref.day);
+    final int d = today
+        .difference(DateTime(start.year, start.month, start.day))
+        .inDays;
+    return (d ~/ 7) + 1;
+  }
+
+  ScheduleMeta copyWith({
+    String? grade,
+    int? term,
+    int? week,
+    String? weekStartDate,
+  }) {
     return ScheduleMeta(
       grade: grade ?? this.grade,
       term: term ?? this.term,
       week: week ?? this.week,
+      weekStartDate: weekStartDate ?? this.weekStartDate,
     );
   }
 
@@ -259,6 +288,7 @@ class ScheduleMeta {
     'grade': grade,
     'term': term,
     'week': week,
+    'weekStartDate': weekStartDate,
   };
 
   factory ScheduleMeta.fromJson(Map<String, dynamic> json) {
@@ -266,6 +296,7 @@ class ScheduleMeta {
       grade: json['grade'] as String? ?? '',
       term: json['term'] as int? ?? 1,
       week: json['week'] as int? ?? 1,
+      weekStartDate: json['weekStartDate'] as String? ?? '',
     );
   }
 }

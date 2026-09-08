@@ -12,7 +12,6 @@ import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart'
     show Material, MaterialType, ScaffoldMessenger, SnackBar;
 import 'package:flutter/widgets.dart';
@@ -20,6 +19,7 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/excel/excel_timetable_parser.dart';
+import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../domain/entities/class_period.dart';
 import '../../../domain/entities/course.dart';
@@ -31,9 +31,10 @@ import '../../widgets/cards/card_shell.dart';
 
 // ── 网格几何常量（单一事实源）──
 const double _periodColW = 44; // 节次列宽
-const double _dayColW = 64; // 每天列宽
+const double _dayColW = 64; // 每天列宽(最小宽;宽屏按可用宽自适应)
 const double _rowH = 56; // 每节行高
 const double _headerH = 40; // 表头高
+const double _gridHMargin = 16; // 课表左右边距(v1.49.3:拉满后贴边过挤)
 const int _maxPeriod = 16; // 最大节次（参考 f-start 1-16）
 const List<String> _dayShort = <String>['一', '二', '三', '四', '五', '六', '日'];
 
@@ -79,6 +80,8 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
   final TextEditingController _gradeCtrl = TextEditingController();
   final TextEditingController _termCtrl = TextEditingController();
   final TextEditingController _weekCtrl = TextEditingController();
+  // v1.49.3:第一周起始日(可选;设了 → 当前周次自动推算)。
+  final TextEditingController _weekStartCtrl = TextEditingController();
   // v1.42.0:起止周输入(开始周/结束周)。
   final TextEditingController _wsCtrl = TextEditingController();
   final TextEditingController _weCtrl = TextEditingController();
@@ -167,11 +170,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
     if (rangeMode) {
       final int? s = int.tryParse(_wsCtrl.text.trim());
       final int? e = int.tryParse(_weCtrl.text.trim());
-      if (s == null ||
-          e == null ||
-          s < 1 ||
-          e > 30 ||
-          s > e) {
+      if (s == null || e == null || s < 1 || e > 30 || s > e) {
         _showSnack('起止周无效:开始周需 ≤ 结束周(1-30)');
         return;
       }
@@ -227,31 +226,37 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
 
   /// 保存学期信息。
   Future<void> _saveMeta() async {
-    await ref
-        .read(scheduleMetaProvider.notifier)
-        .saveMeta(
-          ScheduleMeta(
-            grade: _gradeCtrl.text.trim(),
-            term: int.tryParse(_termCtrl.text.trim()) ?? 1,
-            week: int.tryParse(_weekCtrl.text.trim()) ?? 1,
-          ),
-        );
+    // v1.49.3:起始日有效 → 当前周次自动派生(同时固化到 week,兜底兼容)。
+    final String startRaw = _weekStartCtrl.text.trim();
+    final DateTime? start = DateTime.tryParse(startRaw);
+    final ScheduleMeta meta = ScheduleMeta(
+      grade: _gradeCtrl.text.trim(),
+      term: int.tryParse(_termCtrl.text.trim()) ?? 1,
+      week: int.tryParse(_weekCtrl.text.trim()) ?? 1,
+      weekStartDate: start == null ? '' : startRaw,
+    );
+    if (start != null) {
+      final ScheduleMeta auto = meta.copyWith(week: meta.effectiveWeek());
+      await ref.read(scheduleMetaProvider.notifier).saveMeta(auto);
+    } else {
+      if (startRaw.isNotEmpty) {
+        if (mounted) _showSnack('起始日格式无效（示例 2026-09-01），已按手动周次保存');
+      }
+      await ref.read(scheduleMetaProvider.notifier).saveMeta(meta);
+    }
   }
 
   /// v1.17.0（S-18 导入）：选择 Excel 课表 → 解析 → 合并导入（同格替换）。
   Future<void> _importTimetable() async {
-    final PlatformFile? file = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const <String>['xls', 'xlsx'],
-    );
-    if (file == null) return; // 用户取消
-    final Uint8List bytes;
+    final PlatPickedFile? file;
     try {
-      bytes = await file.readAsBytes();
+      file = await PlatFileOpsRegistry.instance.pickExcel();
     } catch (e) {
       if (mounted) _showSnack('读取文件失败：$e');
       return;
     }
+    if (file == null) return; // 用户取消
+    final Uint8List bytes = file.bytes;
     if (bytes.isEmpty) {
       if (mounted) _showSnack('读取文件失败：文件为空');
       return;
@@ -310,38 +315,52 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
         final AppSettingsController settingsCtrl = ref.read(
           appSettingsProvider.notifier,
         );
-        final double width = MediaQuery.sizeOf(context).width;
         // 学期表单控制器同步（仅首次/变化时）。
         _gradeCtrl.text = meta.grade;
         _termCtrl.text = '${meta.term}';
         _weekCtrl.text = '${meta.week}';
+        _weekStartCtrl.text = meta.weekStartDate;
 
-        final Widget list = ListView(
-          // v1.18.x（T1）：列表按下即跟手（DragStartBehavior.down）。
-          dragStartBehavior: DragStartBehavior.down,
-          padding: EdgeInsets.only(top: 12 + padding.top, bottom: 24),
-          addAutomaticKeepAlives: false,
-          children: <Widget>[
-            // 学期 badge。
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: MiuixText(
-                '${meta.grade.isEmpty ? '未设置年级' : meta.grade} · '
-                '第${meta.term}学期 · 第${meta.week}周',
-                style: MiuixTheme.of(context).textStyles.body2,
-                color: colors.onSurfaceVariantSummary,
+        // v1.49.3(横屏平板修复):可用宽度取【视口宽】(LayoutBuilder),
+        //   不再是 MediaQuery 整屏宽 —— 宽屏下内容列(总宽-侧栏)才是网格可占宽,
+        //   避免网格按整屏宽算后仍用固定 64px 日列 →「课表像手机、贴左、右侧空白」。
+        final Widget list = LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final double availWidth = constraints.maxWidth;
+            return ListView(
+              // v1.18.x（T1）：列表按下即跟手（DragStartBehavior.down）。
+              dragStartBehavior: DragStartBehavior.down,
+              padding: EdgeInsets.only(
+                left: _gridHMargin,
+                right: _gridHMargin,
+                top: 12 + padding.top,
+                bottom: 24,
               ),
-            ),
-            // 学期 meta 表单（MiuixCard）。
-            _buildMetaCard(colors),
-            const SizedBox(height: 12),
-            // v1.21.0:节次时间表入口(16 节起止时间 → 首页课程倒计时)。
-            _buildPeriodsEntry(colors, periods),
-            const SizedBox(height: 12),
-            // 周课表网格（自适应：窄屏横向滚动、宽屏填满）。
-            _buildGrid(courses, meta, width, colors),
-            const SizedBox(height: 8),
-          ],
+              addAutomaticKeepAlives: false,
+              children: <Widget>[
+                // 学期 badge。
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: MiuixText(
+                    '${meta.grade.isEmpty ? '未设置年级' : meta.grade} · '
+                    '第${meta.term}学期 · 第${meta.effectiveWeek()}周'
+                    '${meta.weekStartDate.isEmpty ? '' : '（自动）'}',
+                    style: MiuixTheme.of(context).textStyles.body2,
+                    color: colors.onSurfaceVariantSummary,
+                  ),
+                ),
+                // 学期 meta 表单（MiuixCard）。
+                _buildMetaCard(colors),
+                const SizedBox(height: 12),
+                // v1.21.0:节次时间表入口(16 节起止时间 → 首页课程倒计时)。
+                _buildPeriodsEntry(colors, periods),
+                const SizedBox(height: 12),
+                // 周课表网格（自适应：窄屏横向滚动、宽屏日列拉满）。
+                _buildGrid(courses, meta, availWidth, colors),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
         );
         // v1.42.0(④A):摘除页面级采样(C-28/心跳) — 滚动零 toImageSync。
         final Widget listWithBg = ColoredBox(
@@ -762,6 +781,13 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
               ],
             ),
             const SizedBox(height: 10),
+            // v1.49.3:第一周起始日(可选) → 当前周次随日期自动推算。
+            MiuixTextField(
+              label: '第一周起始日（可选，如 2026-09-01；设后周次自动更新）',
+              controller: _weekStartCtrl,
+              singleLine: true,
+            ),
+            const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerRight,
               child: MiuixButton(
@@ -784,14 +810,15 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
   Widget _buildGrid(
     List<Course> courses,
     ScheduleMeta meta,
-    double screenWidth,
+    double availWidth,
     MiuixColors colors,
   ) {
     final MiuixTextStyles textStyles = MiuixTheme.of(context).textStyles;
-    final double gridWidth = math.max(
-      screenWidth - 24,
-      _periodColW + 7 * _dayColW,
-    );
+    // v1.49.3:日列宽自适应 —— 宽屏/平板按内容可用宽均分 7 列(拉满消除右侧
+    //   空白与「贴左」),窄屏保持 [_dayColW] 最小宽(横向滚动截取);
+    //   左右边距由 ListView contentPadding([_gridHMargin])统一承担。
+    final double dayW = math.max(_dayColW, (availWidth - _periodColW) / 7);
+    final double gridWidth = math.max(availWidth, _periodColW + 7 * dayW);
     const double gridHeight = _headerH + _maxPeriod * _rowH;
 
     return SingleChildScrollView(
@@ -811,9 +838,9 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
             ),
             for (int d = 0; d < 7; d++)
               Positioned(
-                left: _periodColW + d * _dayColW,
+                left: _periodColW + d * dayW,
                 top: 0,
-                width: _dayColW,
+                width: dayW,
                 height: _headerH,
                 child: _headerCell('周${_dayShort[d]}', colors, textStyles),
               ),
@@ -828,28 +855,28 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
               ),
               for (int d = 1; d <= 7; d++)
                 Positioned(
-                  left: _periodColW + (d - 1) * _dayColW,
+                  left: _periodColW + (d - 1) * dayW,
                   top: _headerH + (p - 1) * _rowH,
-                  width: _dayColW,
+                  width: dayW,
                   height: _rowH,
                   child: _emptyCell(d, p, colors),
                 ),
             ],
             // 课程块（上层，单双周过滤）。
             for (final Course c in courses)
-              if (c.showsOn(meta.week))
+              if (c.showsOn(meta.effectiveWeek()))
                 Positioned(
-                  left: _periodColW + (c.day - 1) * _dayColW + 2,
+                  left: _periodColW + (c.day - 1) * dayW + 2,
                   top: _headerH + (c.start - 1) * _rowH + 2,
-                  width: _dayColW - 4,
+                  width: dayW - 4,
                   height: c.len * _rowH - 4,
                   child: _courseBlock(c, meta, colors),
                 )
               else
                 Positioned(
-                  left: _periodColW + (c.day - 1) * _dayColW + 2,
+                  left: _periodColW + (c.day - 1) * dayW + 2,
                   top: _headerH + (c.start - 1) * _rowH + 2,
-                  width: _dayColW - 4,
+                  width: dayW - 4,
                   height: c.len * _rowH - 4,
                   // 非本周（单双周不匹配）→ 淡化显示，仍可点击编辑。
                   child: Opacity(
@@ -1163,10 +1190,7 @@ class _PageP06TimetablePageState extends ConsumerState<PageP06TimetablePage> {
   }
 
   /// 起止周编辑区：开始周 / 结束周 数字输入(1..30,提交校验起 ≤ 止)。
-  Widget _buildWeekRangeEditor(
-    MiuixColors colors,
-    MiuixTextStyles textStyles,
-  ) {
+  Widget _buildWeekRangeEditor(MiuixColors colors, MiuixTextStyles textStyles) {
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Column(

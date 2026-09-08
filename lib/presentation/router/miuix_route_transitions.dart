@@ -61,9 +61,11 @@ Widget buildMiuixRouteTransitions(
   Widget child,
 ) {
   // ── 顶层角色：右滑入/右滑出 + 转场期间左缘上下圆角 ──────────
+  // PERF-B：滑入页独立 RepaintBoundary → 转场期间为独立合成层，
+  //   平移零逐帧重绘（页面内容重绘不连锁整屏 raster）。
   final Widget topLevel = AnimatedBuilder(
     animation: animation,
-    child: child,
+    child: RepaintBoundary(child: child),
     builder: (BuildContext context, Widget? c) {
       // 与最初验收版(阻尼 0.95)同一套逻辑,仅阻尼数值改为 0.75:
       // 位移统一 = 1 − curve(animation.value),进/退均由曲线反向遍历驱动

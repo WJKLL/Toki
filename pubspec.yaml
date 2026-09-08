@@ -15,7 +15,7 @@ publish_to: 'none'
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.49.0+152
+version: 1.49.1+153
 
 environment:
   sdk: ^3.13.2
@@ -90,6 +90,21 @@ flutter:
   assets:
     - assets/tools/tools.json
     - assets/images/app_icon.png
+    # OH 引擎 LTPO 帧率投票开关(SWITCH 0 = 关闭投票,跟随系统设置);
+    # Android/Web 忽略此文件。
+    - framesconfig.json
+
+  # v1.49.1（Web 字体本地化修复）：Flutter Web(CanvasKit)默认文本字体走
+  #   fonts.gstatic.com 远程分片下载(Roboto / Noto Sans SC / Noto Color Emoji),
+  #   网络无法访问 gstatic 时(如无外网/被重置)全部文字无法渲染且无限重试。
+  #   将默认 family 名 Roboto 注册为本地 Noto Sans SC 可变字体(OFL 1.1 开源,
+  #   拉丁+中文全覆盖,flutter_miuix 文本与业务文本均继承默认 family):
+  #   引擎命中本地字体后不再发起任何远程字体请求。Android 端同一字体文件
+  #   一并打包(apk 体积 +17MB),文本渲染统一为 Noto Sans SC,不依赖系统字体。
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/NotoSansSC-VF.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

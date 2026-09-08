@@ -109,18 +109,27 @@ class _Semaphore {
   }
 }
 
+/// 工具调用诊断回调（可选）：非 2xx 时上报 status/url/body，供平台侧定位。
+/// 仅打状态/URL/响应体，**不含任何请求头**（Authorization 含 key 绝不入日志）。
+typedef ToolApiDiag = void Function(String message);
+
 /// 通用工具调用服务（v1.35.0；v1.38.1 网络错误自动重试一次 + 超时 15s）。
 class ToolApiService {
   ToolApiService({
     http.Client? client,
     this.timeout = const Duration(seconds: 15),
     int maxConcurrent = 3,
+    this.diag,
   }) : _client = client ?? http.Client(),
        _sem = _Semaphore(maxConcurrent);
 
   final http.Client _client;
   final Duration timeout;
   final _Semaphore _sem;
+
+  /// 诊断回调（默认 null → 零行为变化）。OH 镜像经 main.dart 注入
+  /// 并转发到 xiangjugong/diag 通道 → hilog（一次取证用）。
+  final ToolApiDiag? diag;
 
   /// 在途请求去重表（key = 方法+路径+参数+key；完成即移除）。
   final Map<String, Future<ToolApiResult>> _inflight =
@@ -143,6 +152,9 @@ class ToolApiService {
     if (tool.requiresAuth && (apiKey == null || apiKey.trim().isEmpty)) {
       throw const ToolApiException(ToolApiError.needsKey);
     }
+    // W1 取证：请求发起即记录（任意结局都有痕；供 OH 平台侧定位）。
+    diag?.call('[tool-api] call ${tool.id} params=${values.length} '
+        'files=${files?.length ?? 0} start');
     await _sem.acquire();
     final String key = _requestKey(tool, values, apiKey, files);
     final Future<ToolApiResult>? existing = _inflight[key];
@@ -272,10 +284,13 @@ class ToolApiService {
     }
 
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      throw _errorForStatus(
-        resp.statusCode,
-        utf8.decode(resp.bodyBytes, allowMalformed: true),
-      );
+      final String bodyText = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      // W1 取证：错误时上报 status/url/body（无鉴权头）供平台侧定位。
+      diag?.call('[tool-api] id=${tool.id} status=${resp.statusCode} '
+          'method=${tool.method} url=$uri '
+          "content-type=${resp.headers['content-type']} "
+          'body=${_clip(bodyText)}');
+      throw _errorForStatus(resp.statusCode, bodyText);
     }
     return _parseResult(resp);
   }
@@ -291,6 +306,10 @@ class ToolApiService {
     }
     return '$base.bin';
   }
+
+  /// 截断诊断 body（避免超长日志；不含鉴权头数据）。
+  static String _clip(String s, [int max = 200]) =>
+      s.length > max ? '${s.substring(0, max)}…(+${s.length - max})' : s;
 
   ToolApiException _errorForStatus(int status, String bodyText) {
     String? serverMessage;

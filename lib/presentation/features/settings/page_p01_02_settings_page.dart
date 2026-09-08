@@ -203,7 +203,8 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
       if (!mounted) return;
       setState(() {
         _exporting = false;
-        _exportNotice = '已保存到 Download/$name';
+        // DSH-OH:OH 分支由服务返回完整提示文案(hilog dump),Android 返回 Download 路径。
+        _exportNotice = name;
       });
     } catch (e) {
       if (!mounted) return;

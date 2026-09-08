@@ -9,11 +9,11 @@
 // 视觉:字段纵向排列,间距 12;由使用方(P-09)决定是否套 C03GroupCard。
 import 'dart:typed_data' show Uint8List;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart' show TextInputAction;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 
+import '../../core/platform/contract/plat_file_ops.dart';
 import '../../core/widgets/app_icons.dart';
 import '../../domain/entities/tool_config.dart';
 
@@ -120,19 +120,10 @@ class _C40ToolDynamicParamsState extends State<C40ToolDynamicParams> {
   // ── file：选择图片（相册/文件，跨平台字节读取）──────────────
 
   Future<void> _pickImage(ToolParam p) async {
-    final PlatformFile? file = await FilePicker.pickFile(
-      type: FileType.image,
-    );
+    final PlatPickedFile? file = await PlatFileOpsRegistry.instance.pickImage();
     if (file == null || !mounted) return; // 用户取消。
-    final Uint8List bytes;
-    try {
-      bytes = await file.readAsBytes();
-    } catch (_) {
-      return;
-    }
-    if (bytes.isEmpty) return;
     setState(() {
-      _files[p.name] = PickedToolFile(bytes: bytes, name: file.name);
+      _files[p.name] = PickedToolFile(bytes: file.bytes, name: file.name);
     });
     widget.onFilesChanged
         ?.call(Map<String, PickedToolFile>.unmodifiable(_files));

@@ -30,7 +30,10 @@ class PageP0101HomePage extends ConsumerStatefulWidget {
   ConsumerState<PageP0101HomePage> createState() => _PageP0101HomePageState();
 }
 
-class _PageP0101HomePageState extends ConsumerState<PageP0101HomePage> {
+class _PageP0101HomePageState extends ConsumerState<PageP0101HomePage>
+    with AutomaticKeepAliveClientMixin<PageP0101HomePage> {
+  @override
+  bool get wantKeepAlive => true;
   // v1.44.0(UI)：左上角不再放占位假按钮(无功能且多余背景),与待办页统一。
   // v1.49.0：右下占位「+」FAB 一并删除。
 
@@ -40,6 +43,8 @@ class _PageP0101HomePageState extends ConsumerState<PageP0101HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // PERF-A：一级页保活(切 Tab 零重建)；mixin 必须调用 super.build 并忽略返回值。
+    super.build(context);
     // 🔧 v1.2.0（C-22 内容穿透）：悬浮底栏开启时，底部追加穿透安全间距。
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled

@@ -39,11 +39,13 @@ class C48FlowToolbarV2 extends StatefulWidget {
     required this.onExportHtml,
     this.onToggleMiniMap,
     this.onToggleLod,
+    this.onTogglePreview,
     required this.canUndo,
     required this.canRedo,
     this.hasClip = false,
     this.miniMapOn = false,
     this.lodOn = false,
+    this.previewOn = false,
     this.playing = false,
     this.nodeCount = 0,
     this.visible = true,
@@ -63,6 +65,7 @@ class C48FlowToolbarV2 extends StatefulWidget {
   final VoidCallback onExportHtml;
   final VoidCallback? onToggleMiniMap;
   final VoidCallback? onToggleLod;
+  final VoidCallback? onTogglePreview;
   final bool canUndo;
   final bool canRedo;
   final bool hasClip;
@@ -70,6 +73,9 @@ class C48FlowToolbarV2 extends StatefulWidget {
   /// 视图开关状态(选中高亮;宿主页面持有)。
   final bool miniMapOn;
   final bool lodOn;
+
+  /// 预览窗(宽屏右栏)开关状态;宿主页面持有。
+  final bool previewOn;
 
   /// 播放中(FAB 隐藏时页面直接不渲染,此参数保留给 docked 态显示)。
   final bool playing;
@@ -296,6 +302,13 @@ class C48FlowToolbarV2State extends State<C48FlowToolbarV2> {
             ),
             _viewPill(
               colors,
+              '预览窗',
+              IconsView.panel,
+              widget.previewOn,
+              () => _act(widget.onTogglePreview ?? () {}),
+            ),
+            _viewPill(
+              colors,
               '简化',
               IconsView.lod,
               widget.lodOn,
@@ -500,6 +513,7 @@ class C48FlowToolbarV2State extends State<C48FlowToolbarV2> {
               MiuixIcon(
                 vector: switch (icon) {
                   IconsView.grid => appIcon('gridView'),
+                  IconsView.panel => appIcon('sidebar'),
                   IconsView.lod => appIcon('layers'),
                   IconsView.legend => appIcon('info'),
                   _ => appIcon('info'),
@@ -561,4 +575,4 @@ class C48FlowToolbarV2State extends State<C48FlowToolbarV2> {
 }
 
 /// 视图胶囊图标类型。
-enum IconsView { none, fit, grid, lod, legend }
+enum IconsView { none, fit, grid, panel, lod, legend }

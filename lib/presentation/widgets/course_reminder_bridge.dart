@@ -53,18 +53,18 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
         (_, CurrentClass? next) => _onCurrentClass(next),
       );
       // 课程提醒总开关：关 → 清闹钟 + 停常驻；开 → 重排 + 恢复上课态。
-      ref.listen(
-        appSettingsProvider.select((s) => s.courseReminderEnabled),
-        (_, bool enabled) {
-          if (!enabled) {
-            unawaited(ReminderService.cancelAllAlarms());
-            unawaited(ReminderService.stopCountdown());
-          } else {
-            _scheduleCourseAlarms();
-            _onCurrentClass(ref.read(currentClassProvider));
-          }
-        },
-      );
+      ref.listen(appSettingsProvider.select((s) => s.courseReminderEnabled), (
+        _,
+        bool enabled,
+      ) {
+        if (!enabled) {
+          unawaited(ReminderService.cancelAllAlarms());
+          unawaited(ReminderService.stopCountdown());
+        } else {
+          _scheduleCourseAlarms();
+          _onCurrentClass(ref.read(currentClassProvider));
+        }
+      });
       // 首帧后初始排程 + 覆盖「启动即在上课」（非 listen 副作用走 postFrame）。
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -83,7 +83,9 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
         ref.read(courseListProvider).value ?? const <Course>[];
     final meta = ref.read(scheduleMetaProvider).value;
     if (courses.isEmpty || meta == null) return;
-    final List<ClassPeriod> periods = ref.read(appSettingsProvider).classPeriods;
+    final List<ClassPeriod> periods = ref
+        .read(appSettingsProvider)
+        .classPeriods;
     final DateTime now = DateTime.now();
 
     for (int dayOffset = 0; dayOffset <= 1; dayOffset++) {
@@ -91,7 +93,7 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
       final int weekday = day.weekday; // 1=周一..7=周日
       for (final Course c in courses) {
         if (c.day != weekday) continue;
-        if (!c.showsOn(meta.week)) continue; // 跨周边界以当前周近似。
+        if (!c.showsOn(meta.effectiveWeek(day))) continue; // 跨周边界以目标日近似。
         if (c.start < 1 || c.start > periods.length) continue;
         final ClassPeriod p = periods[c.start - 1];
         if (!p.enabled) continue;
@@ -105,7 +107,8 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
         if (dayOffset == 0 && !at.isAfter(now)) continue; // 今天已过/正在不排
         final int id =
             ('course_alarm_${c.id}_${day.year}${day.month}${day.day}')
-                .hashCode & 0x7fffffff;
+                .hashCode &
+            0x7fffffff;
         // v1.40.1(C 方案):课程闹钟携带结束参数 —— 到点原生直启倒计时
         // 常驻(App 不在也出现);时间未设置(span null)则仅弹到点通知。
         final _Span? span = _spanOf(c, periods);
@@ -162,7 +165,9 @@ class _CourseReminderBridgeState extends ConsumerState<CourseReminderBridge> {
       unawaited(ReminderService.stopCountdown());
       return;
     }
-    final List<ClassPeriod> periods = ref.read(appSettingsProvider).classPeriods;
+    final List<ClassPeriod> periods = ref
+        .read(appSettingsProvider)
+        .classPeriods;
     final _Span? span = _spanOf(cur.course, periods);
     if (span == null) {
       unawaited(ReminderService.stopCountdown());

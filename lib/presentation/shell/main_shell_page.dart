@@ -18,6 +18,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +26,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/lifecycle/app_lifecycle_controller.dart';
 import '../../core/logging/app_log_service.dart';
+import '../../core/logging/perf_monitor.dart';
 import '../../core/refresh_rate/refresh_rate_controller.dart';
 import '../../core/utils/u03_blur_policy.dart';
 import '../../core/utils/u04_platform_utils.dart';
@@ -60,7 +62,16 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   );
 
   /// T64：一级页面 PageController（≈ 参考 HorizontalPager 的 PagerState）。
+  /// DSH-OH fix:窄/宽各一个独立 controller —— 折叠/展开把 PageView 从窄分支
+  ///   (Column)整体换成宽分支(Row)时,旧 PageView 帧末才 detach,共用单
+  ///   controller 会瞬间双挂载(positions.length==2):读 .page 触发框架断言
+  ///   (红屏)且程序化翻页/拖拽失效。各自独立后互不干扰。
   late final PageController _pageController = PageController();
+  late final PageController _pageWideController = PageController();
+
+  /// 当前布局分支的 active controller(build 中 _lastWide 已先更新)。
+  PageController get _activeController =>
+      (_lastWide ?? false) ? _pageWideController : _pageController;
 
   /// 深链首次同步标志：didChangeDependencies 后一次性把 PageView 跳到 URL 页。
   bool _pageSynced = false;
@@ -73,6 +84,17 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   ///   const MainShellPage，导致 currentIndex 冻结、指示器 didUpdateWidget 不触发。
   int _currentIndex = 0;
 
+  /// DSH-OH diag:导航诊断经原生通道打 hilog(tag XJChannels)——本引擎 Dart
+  /// debugPrint 不进 hilog,故走 MethodChannel;仅诊断用,catchError 吞错不影响导航。
+  static const MethodChannel _diagChannel = MethodChannel('xiangjugong/diag');
+  void _diag(String msg) {
+    unawaited(
+      _diagChannel
+          .invokeMethod<void>('log', <String, Object?>{'msg': msg})
+          .catchError((Object _) {}),
+    );
+  }
+
   // ── v1.43.0：窄/宽布局切换校正 ──
   /// 上次布局分支（窄屏底栏 / 宽屏侧栏）。切换会重建 PageView（树结构不同），
   /// 新 ScrollPosition 落回 initialPage 0（待办）→ 帧后跳回用户所在页。
@@ -83,6 +105,9 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   ///   触发 onPageChanged，若不忽略，中间页会覆盖 currentIndex → 指示器
   ///   didUpdateWidget 反复弹簧到中间页再弹回目标（"反方向弹动"根因）。
   bool _programmaticPageChange = false;
+
+  /// 底栏项数缓存(路由回调防 ref-after-deactivate;build 时同步)。
+  int _itemsLen = 3;
 
   // ── T50（P1 采样卡死修复）：页面级毛玻璃快照 ──
   /// 仅悬浮模式 + 毛玻璃开关（v1.10.21）+ Android 13+（U-03）创建；
@@ -108,7 +133,17 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   /// 由滚动通知驱动：
   ///   - ScrollStart/End → S-16 锁定/释放高刷（滚动中持续 120Hz）；
   ///   - ScrollUpdate → 速度检测（>阈值降级毛玻璃，S-19）。
+  /// v1.49.2（横屏切页诊断）：depth==0（PageView 自身滚动，页内列表 depth≥1）的
+  ///   ScrollStart→ScrollEnd 作为「横滑翻页窗口」帧统计（量化横滑 build vs raster，
+  ///   与程序化 pageSwitch 窗口互补；程序化动画窗口已由 pageSwitch 覆盖，故跳过）。
   bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth == 0 && !_programmaticPageChange) {
+      if (notification is ScrollStartNotification) {
+        PerfMonitor.instance.beginWindow('swipe');
+      } else if (notification is ScrollEndNotification) {
+        PerfMonitor.instance.endWindow();
+      }
+    }
     if (notification is ScrollStartNotification) {
       RefreshRateController.instance.notifyScrollStart();
     } else if (notification is ScrollEndNotification) {
@@ -160,7 +195,8 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     // 3) 回默认首页 tab（page=1；jumpToPage 无中间页动画，指示器直落位）。
     if (_currentIndex != 1) {
       setState(() => _currentIndex = 1);
-      if (_pageController.hasClients) _pageController.jumpToPage(1);
+      final PageController c = _activeController;
+      if (c.hasClients) c.jumpToPage(1);
       context.go('/?page=1');
     }
     AppLogService.instance.info('lifecycle', '后台≥15s 复位完成(回首页)');
@@ -216,9 +252,13 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
       _pageSynced = true;
       final int idx = _pageIndex(context);
       _currentIndex = idx;
+      _diag('nav.initPage idx=$idx');
       if (idx != 0) {
+        // DSH-OH fix:postFrame 里取 active(_lastWide 已在首帧 build 更新)。
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _pageController.jumpToPage(idx);
+          if (!mounted) return;
+          final PageController c = _activeController;
+          if (c.hasClients) c.jumpToPage(idx);
         });
       }
     }
@@ -232,11 +272,12 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     final String? page = router.state.uri.queryParameters['page'];
     final int? raw = int.tryParse(page ?? '');
     if (raw == null) return;
-    final int maxPage = ref.read(bottomBarItemsProvider).length - 1;
+    final int maxPage = _itemsLen - 1;
     final int idx = raw.clamp(0, maxPage);
     if (idx == _currentIndex) return;
     setState(() => _currentIndex = idx);
-    _pageController.jumpToPage(idx);
+    final PageController c = _activeController;
+    if (c.hasClients) c.jumpToPage(idx);
   }
 
   @override
@@ -247,6 +288,7 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     WidgetsBinding.instance.removeObserver(this);
     _bgResetTimer?.cancel(); // S-24：后台复位计时兜底释放。
     _pageController.dispose();
+    _pageWideController.dispose();
     _railState.dispose();
     // T50：页面级 backdrop 释放（悬浮模式关闭时已置 null，此处兜底）。
     _backdrop?.dispose();
@@ -269,6 +311,8 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   void _onDestinationSelected(int index) {
     if (index == _currentIndex) return;
     final int prevIndex = _currentIndex; // 记录旧值（setState 前）
+    // DSH-OH diag:onPressed 是否进到此处、active PageController 是否已 attach。
+    _diag('nav.sel prev=$prevIndex -> $index hasClients=${_activeController.hasClients}');
     final int distance = (index - prevIndex).abs();
     final Duration duration = Duration(
       milliseconds:
@@ -278,11 +322,18 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     // v1.10.31：标记程序化翻页，动画经过中间页的 onPageChanged 将被忽略，
     //   避免中间页覆盖 currentIndex 导致指示器反方向弹动。
     _programmaticPageChange = true;
+    // v1.49.2(切页诊断)：动画窗口帧统计(begin/end 仅 enabled 时生效,零开销红线)。
+    PerfMonitor.instance.beginWindow('pageSwitch');
+    final PageController pc = _activeController;
     unawaited(
-      _pageController
-          .animateToPage(index, duration: duration, curve: Curves.easeInOut)
+      pc.animateToPage(index, duration: duration, curve: Curves.easeInOut)
           .whenComplete(() {
-            if (mounted) _programmaticPageChange = false;
+            // PERF-C：复位切换标志(setState → 心跳恢复静止档采样)。
+            if (mounted) setState(() => _programmaticPageChange = false);
+            // v1.49.2：输出切页窗口统计(ui build vs raster 对照)。
+            PerfMonitor.instance.endWindow();
+            // DSH-OH diag:动画结束(不读 .page:切帧中 positions 可能瞬时≠1)。
+            _diag('nav.animateDone target=$index');
           }),
     );
     // v1.10.1：显式 setState 更新 currentIndex（不依赖路由隐式重建）→ C-22
@@ -295,6 +346,8 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
 
   /// 页面手势横滑完成 → 同步 URL + 显式 setState（严格 1:1：指示器仅此刻吸附）。
   void _onPageChanged(int index) {
+    // DSH-OH diag:PageView 是否真的翻页完成回调(永不触发 → 内容未切)。
+    _diag('nav.pageChanged index=$index prog=$_programmaticPageChange');
     // v1.10.31：程序化翻页动画（animateToPage）经过中间页时忽略 ——
     //   currentIndex / URL 已由 _onDestinationSelected 一次性设为目标，
     //   中间页覆盖会导致指示器弹簧到中间页再弹回（反方向弹动）。
@@ -316,22 +369,31 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     // v1.43.0：窄/宽分支切换 → PageView 重建落回 initialPage → 帧后校正回
     //   当前页（旋转后用户不应被丢回待办/首页另一页）。
     if (_lastWide != null && isWide != _lastWide) {
+      // DSH-OH diag:折叠/展开 → 宽窄布局翻转 → PageView 重建。
+      //   不读 .page(build 中读会触发 positions.length==1 断言,见双 controller)。
+      _diag('nav.fold wide=$isWide lastWide=$_lastWide cur=$_currentIndex');
       _needsPageResync = true;
     }
     _lastWide = isWide;
     if (_needsPageResync) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_pageController.hasClients) return;
+        if (!mounted) return;
+        final PageController c = _activeController; // 新分支的独立 controller
+        if (!c.hasClients) return;
         _needsPageResync = false;
-        final double? p = _pageController.page;
+        final double? p = c.page; // postFrame 时旧分支已 detach,单 position 安全。
+        _diag('nav.resync page=$p cur=$_currentIndex');
         if (p != null && p.round() != _currentIndex) {
-          _pageController.jumpToPage(_currentIndex);
+          c.jumpToPage(_currentIndex);
         }
       });
     }
     final int currentIndex = _currentIndex; // State 字段（v1.10.1 显式管理）
     // v1.13.0：底栏项 / PageView 页数同源（bottomBarItemsProvider，动态 2→N）。
     final List<C22BarItemData> items = ref.watch(bottomBarItemsProvider);
+    // 页数缓存：路由回调(listener)可能在元素 deactivate 后触发,
+    //   届时 ref.read 会抛 —— 只读缓存值。
+    _itemsLen = items.length;
 
     // v1.20.0（P-07 协议卡）：backdrop 同步提前到 build 顶层 —— AgreementGate
     //   在本 build 外层取 _backdrop,必须先裁决并创建(否则首帧拿到 null,
@@ -345,11 +407,11 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     );
     _syncBackdrop(!isWide && blurAllowed);
 
-    // v1.0.1：移动端（Android）页面缩放已禁用（设置页拉条置灰），
-    // 此处强制 1.0 直通（C-15 零开销短路），残留设置不生效。
-    final double pageScale = U04PlatformUtils.isAndroid
-        ? 1.0
-        : settings.pageScale;
+    // v1.49.1：页面缩放由 C-15 几何 Transform 改为 Web 布局级 CSS 缩放
+    //   （index.html tokiSetPageScale，main.dart 桥接；覆盖全部路由页含二级页，
+    //   等价浏览器网页缩放）。此处恒 1.0 直通（C-15 零开销短路），
+    //   Android 端页面缩放本就禁用（v1.0.1 起），残留设置值不生效。
+    const double pageScale = 1.0;
 
     // T64：一级页面 PageView（页数与底栏项同源：待办/首页/工具）。
     // v1.43.0(P-10)：待办加在首页左边(index 0)；默认启动仍落首页(page=1,
@@ -358,7 +420,11 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     final Widget content = C15PageScaleContainer(
       scale: pageScale, // ⚡ 功耗优化：1.0 时直通零开销
       child: PageView(
-        controller: _pageController,
+        controller: _activeController,
+        // v1.49.2（横屏切页性能，成熟方案）：开启后相邻页（cacheExtent=1 视口宽）
+        //   提前 build+layout+paint，横滑/点击进入目标页零首建 → 消除 build 峰
+        //   （横屏剖面 buildP95 14.59ms）；配合 keepalive 状态常驻。
+        allowImplicitScrolling: true,
         // v1.23.1:卡片拖拽排序中 → 禁一级页横滑(防止拖拽被误判为切页)。
         physics: ref.watch(dragActiveProvider)
             ? const NeverScrollableScrollPhysics()
@@ -366,10 +432,12 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
         // v1.18.x（T1）：切页按下即跟手（DragStartBehavior.down）。
         dragStartBehavior: DragStartBehavior.down,
         onPageChanged: _onPageChanged,
+        // PERF-B：每页独立 RepaintBoundary（切换/转场滑动 = 合成层移动
+        //   零逐帧重绘；页间重绘隔离），配合 A（keepalive）消除切换重建掉帧。
         children: const <Widget>[
-          PageP10TodoPage(),
-          PageP0101HomePage(),
-          PageP0104ToolsPage(),
+          RepaintBoundary(child: PageP10TodoPage()),
+          RepaintBoundary(child: PageP0101HomePage()),
+          RepaintBoundary(child: PageP0104ToolsPage()),
         ],
       ),
     );
@@ -415,12 +483,21 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     //   v1.10.25：心跳改为被动帧回调（无 Ticker）→ 内容静止零帧请求，
     //     系统自适应刷新率可降频省电；采样率 everyNFrames 4→3
     //     （120Hz 内容 40Hz 采样），模糊度不变（12dp）。
-    final Widget captured = _backdrop != null
-        ? C28DownsampledCapture(
-            backdrop: _backdrop!,
-            child: CaptureHeartbeat(everyNFrames: 4, child: content),
-          )
-        : content;
+        // 切换中（程序化切页动画）→ 心跳降采样档；正常滚动跟手用活动档。
+        // 仅悬浮模式挂载，关闭即整树卸载 → 零 ticker。
+        // v1.49.2（切页性能）：切换档 8→16、活动档（默认）2→4 —— raster 为
+        //   切页卡顿主凶（剖面数据），σ≈12 毛玻璃下低采样观感无差，成本减半。
+        final Widget captured = _backdrop != null
+            ? C28DownsampledCapture(
+                backdrop: _backdrop!,
+                child: CaptureHeartbeat(
+                  everyNFrames: 4,
+                  switching: _programmaticPageChange,
+                  switchingEveryNFrames: 16,
+                  child: content,
+                ),
+              )
+            : content;
     // P3（v1.17.1）：滚动速度检测 → 快速滚动降级毛玻璃；v1.17.2 滚动起止锁定高刷。
     final Widget scrollCaptured = NotificationListener<ScrollNotification>(
       onNotification: _onScrollNotification,

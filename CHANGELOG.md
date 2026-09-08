@@ -2,6 +2,35 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.50.0-dev（2026-09-08 开发快照）[Android] [Web] [HarmonyOS]
+
+> 本条目为「鸿蒙本地化适配」开发快照（工作区状态,未发布）；HarmonyOS 移植版同仓于 `harmonyos_port/`,详见其 README 与 `NATIVE_FEATURES.md`。
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **问候语节气温差窗**：仅当日命中节气才显示「今日X」（次日回落为时段问候，不再 9/8 显示「今日白露」） | S-22 / C-27 | Android 11+ / Web / HarmonyOS |
+| 功能 | **课表「第一周起始日」+ 自动周次**：设置起始日（如 2026-09-01）后当前周次随日期自动推算（每 7 天 +1,跨年自然滚动）；badge 显示「（自动）」；单双周/指定周过滤、提醒、卡片同步全链路走 `effectiveWeek` | S-15 / P-06 | 同上 |
+| 修复 | **课表页边距与自适应列宽**：学期信息/节次时间表/课表网格统一 16px 左右边距；横屏按可用宽度自适应列宽（不再贴边/左靠右空） | P-06 | 同上 |
+| 平台 | **PLAT-01 平台文件操作注册制抽象**：选图/选 Excel/保存文件/存相册抽出 `PlatFileOps` 注册表（默认实现 = 原 file_picker 逻辑零变化）；HarmonyOS 镜像注册 OH 原生实现 | P-01-01 | Android 11+ / Web（行为不变）/ HarmonyOS |
+| 性能 | **卡片宽屏单层轻档阴影**（≥700px 平板/横屏:双层 → 单层,每卡模糊 pass 减半）+ AS 窗口聚合遥测（jank17/jank8/rasterAvg·P95·Max） | C-34 / CardShadow / perf_monitor | Android 11+ / Web / HarmonyOS |
+| 测试 | greeting 节气次日回落用例 + `effectiveWeek` 6 边界用例（起始日/跨周/跨年/非法/JSON 往返）；15/15 通过,analyze 0 | — | — |
+
+### 涉及编号变更
+- 版本：`1.49.1+153` → `1.50.0-dev`（仅快照,未发布;Mirror/镜像侧功能见 harmonyos_port）。
+
+## v1.49.1（2026-09-08）[Android] [Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **Web 全部文字无法渲染(字体本地化)**：Flutter Web(CanvasKit)默认文本字体由引擎从 fonts.gstatic.com 按 Unicode 分片远程下载(Roboto / Noto Sans SC / Noto Color Emoji),网络无法访问 gstatic(被重置/无外网)时请求失败且无限重试 → 所有字符串不渲染;注册本地 Noto Sans SC 可变字体(OFL 1.1)为默认 family「Roboto」(Miuix 文本与业务文本均继承默认 family),引擎命中本地字体后不再发起任何远程字体请求,断外网亦可完整渲染 | pubspec / 全应用 | Android 11+ / Web |
+| 修复 | **Web「页面缩放」重建为布局级缩放(等价浏览器网页缩放)**：原 C-15 为几何 Transform 放大(不参与布局)→ 缩放比例错乱(放大裁切边缘/缩小留白错位)、仅一级页生效(切二级页/弹层缩放失效);改为 Web 层把 flutter 宿主 CSS 布局尺寸设为 视口/scale(触发 Flutter 真实重排,组件响应式重排、文字重新光栅化)再 transform 放大回视口 —— 全部路由页(含设置/二级页/弹层)统一缩放、无裁切错位,设置页拖动滑块即时预览;Android 行为不变(禁用) | C-15 / shell / main / index.html | Web |
+| 说明 | Android 端同字体一并打包(apk +17MB),文本渲染统一 Noto Sans SC 可变字体(不依赖系统字体);如需 Android 保持系统 MiSans 可后续按平台条件注册 | pubspec | Android 11+ / Web |
+
+### 涉及编号变更
+- 版本：`1.49.0+152` → `1.49.1+153`(Web 字体本地化补丁)。
+
 ## v1.49.0（2026-09-08）[Android] [Web]
 
 ### 变更清单

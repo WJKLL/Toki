@@ -15,6 +15,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 
+import '../../../core/utils/u04_platform_utils.dart';
 import '../../../core/widgets/card_dark_glow.dart';
 
 /// 首页卡片统一阴影壳(双层悬浮阴影 + 暗色高光)。
@@ -61,14 +62,39 @@ class CardShadow extends StatelessWidget {
     BoxShadow(color: Color(0x33000000), blurRadius: 34, offset: Offset(0, 14)),
   ];
 
+  // ── 宽屏(≥700px 平板/横屏)轻档:v1.49.2 由双层减半改为【单层】——
+  //   blur/offset 取双层中值、alpha 合并(定向+环境叠加近似),每卡阴影
+  //   pass 由 2 → 1(12 卡 = 24→12 次模糊);90Hz 剖面 rasterAvg≈10ms 平贴
+  //   预算,暗影是横滑/网格重排期 raster 峰值大头之一。──
+  static const List<BoxShadow> _wideRestLight = <BoxShadow>[
+    BoxShadow(color: Color(0x30000000), blurRadius: 8, offset: Offset(0, 3)),
+  ];
+  static const List<BoxShadow> _wideRestDark = <BoxShadow>[
+    BoxShadow(color: Color(0x5C000000), blurRadius: 8, offset: Offset(0, 3)),
+  ];
+  static const List<BoxShadow> _wideLiftLight = <BoxShadow>[
+    BoxShadow(color: Color(0x4A000000), blurRadius: 12, offset: Offset(0, 5)),
+  ];
+  static const List<BoxShadow> _wideLiftDark = <BoxShadow>[
+    BoxShadow(color: Color(0x7D000000), blurRadius: 12, offset: Offset(0, 5)),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final MiuixColors colors = MiuixTheme.of(context).colors;
     // 深色判定跟随 Miuix 实际取色(Monet 深浅自适应)。
     final bool dark = colors.surface.computeLuminance() < 0.5;
-    final List<BoxShadow> shadows = elevated
-        ? (dark ? _liftDark : _liftLight)
-        : (dark ? _restDark : _restLight);
+    // PERF:宽屏(平板/横屏)用轻档阴影(blur 减半)省 raster 带宽;观感一致。
+    final bool wide = U04PlatformUtils.isWideScreen(
+      MediaQuery.sizeOf(context).width,
+    );
+    final List<BoxShadow> shadows = wide
+        ? (elevated
+              ? (dark ? _wideLiftDark : _wideLiftLight)
+              : (dark ? _wideRestDark : _wideRestLight))
+        : (elevated
+              ? (dark ? _liftDark : _liftLight)
+              : (dark ? _restDark : _restLight));
     final Widget shadowed = DecoratedBox(
       decoration: BoxDecoration(
         // 透明底 + 阴影:阴影形状按卡片外接矩形,模糊后圆角观感自然。

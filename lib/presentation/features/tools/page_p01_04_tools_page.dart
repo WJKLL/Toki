@@ -34,7 +34,10 @@ class PageP0104ToolsPage extends ConsumerStatefulWidget {
   ConsumerState<PageP0104ToolsPage> createState() => _PageP0104ToolsPageState();
 }
 
-class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
+class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage>
+    with AutomaticKeepAliveClientMixin<PageP0104ToolsPage> {
+  @override
+  bool get wantKeepAlive => true;
   // v1.44.0(UI)：左上角不再放占位假按钮,与待办页统一。
 
   // ── C-25：顶部折叠滚动行为(v1.42.0:顶栏纯蒙版,无页面级快照采样)──
@@ -43,6 +46,8 @@ class _PageP0104ToolsPageState extends ConsumerState<PageP0104ToolsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // PERF-A：一级页保活(切 Tab 零重建)；mixin 必须调用 super.build 并忽略返回值。
+    super.build(context);
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled

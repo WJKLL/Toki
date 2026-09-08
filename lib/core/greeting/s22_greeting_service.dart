@@ -150,20 +150,27 @@ class GreetingService {
     return null;
   }
 
-  /// 节气命中：与当日距离 ≤ [_termToleranceDays] 取最近者。
-  /// 窗口语义为「日期表精度容差」——窗口内输出该节气文案（误差最多一天）。
+  /// 节气命中：今日/明日（维度：±1 天气象表精度容差的前向吸收）。
+  ///   - 当天（d==0）→「今日X」；
+  ///   - 节气日在次日（前一天）→「明日X」（数据表精度偏差吸收,如时区差）；
+  ///   - 节气日已过（d==-1 及以上）→ 不命中,回落时段问候 ——
+  ///     修复「白露(9/7)过后 9/8 仍显示今日白露」的卡文案问题(v1.49.3)。
   String? _solarTermText(int doy) {
     String? name;
+    int termDay = -1;
     int bestDist = _termToleranceDays + 1;
     for (final ({int day, String name}) t in _solarTerms) {
       final int d = (t.day - doy).abs();
       if (d < bestDist) {
         bestDist = d;
         name = t.name;
+        termDay = t.day;
       }
     }
     if (name == null || bestDist > _termToleranceDays) return null;
-    return '今日$name';
+    if (termDay - doy == 1) return '明日$name';
+    if (termDay - doy == 0) return '今日$name';
+    return null; // 已过 → 回落时段。
   }
 
   /// 时段命中（按小时）→ 池内随机一条。

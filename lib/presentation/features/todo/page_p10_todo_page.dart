@@ -38,7 +38,10 @@ class PageP10TodoPage extends ConsumerStatefulWidget {
   ConsumerState<PageP10TodoPage> createState() => _PageP10TodoPageState();
 }
 
-class _PageP10TodoPageState extends ConsumerState<PageP10TodoPage> {
+class _PageP10TodoPageState extends ConsumerState<PageP10TodoPage>
+    with AutomaticKeepAliveClientMixin<PageP10TodoPage> {
+  @override
+  bool get wantKeepAlive => true;
   /// 当前选中日期（仅日期部分；默认今天）。
   late DateTime _selectedDate = _today();
 
@@ -264,6 +267,8 @@ class _PageP10TodoPageState extends ConsumerState<PageP10TodoPage> {
 
   @override
   Widget build(BuildContext context) {
+    // PERF-A：一级页保活(切 Tab 零重建)；mixin 必须调用 super.build 并忽略返回值。
+    super.build(context);
     final MiuixColors colors = MiuixTheme.of(context).colors;
     final double throughInset =
         ref.watch(appSettingsProvider).floatingBarEnabled

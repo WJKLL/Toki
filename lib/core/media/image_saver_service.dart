@@ -1,27 +1,21 @@
 // lib/core/media/image_saver_service.dart
-// 编号：C-41 配套 · 图片长按保存服务（v1.40.0 新增）
+// 编号：C-41 配套 · 图片长按保存服务（v1.40.0 新增；PLAT-01 迁移）
 // 说明：工具结果图(body 字节 / field URL)长按保存 ——
-//   - Android: MethodChannel「xiangjugong/media」→ MediaStore 相册
-//     Pictures/Toki(Android 10+ 免存储权限,minSdk 30 恒可用);
-//   - Web: file_picker saveFile(bytes) → 浏览器直接下载;
-//   - 其它桌面: file_picker saveFile 弹系统保存框。
+//   - Android/OH:经 PlatFileOpsRegistry → 平台实现存系统相册
+//     (Android MediaStore Pictures/Toki;OH photoAccessHelper,media 通道);
+//   - Web/桌面:默认实现 file_picker saveFile(浏览器下载/保存框);
 //   防重入:全局 in-flight 标记,保存进行中再次触发返回 null(忽略)。
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
-import 'package:flutter/services.dart'
-    show MethodChannel, PlatformException;
 import 'package:http/http.dart' as http;
+
+import '../platform/contract/plat_file_ops.dart';
 
 /// 图片保存服务（无状态单例语义：全静态方法 + 全局防重入）。
 abstract final class ImageSaverService {
-  static const MethodChannel _channel = MethodChannel('xiangjugong/media');
-
   static bool _busy = false;
 
-  /// 保存图片。成功返回落盘说明(Android 相册路径 / 其它平台文件名)；
+  /// 保存图片。成功返回落盘说明(相册路径 / 平台保存描述)；
   /// [url] 非空时先下载(20s 超时)；[bytes]/[url] 至少一个。
   /// 返回 null = 保存中(已忽略)或无可保存数据。
   static Future<String?> saveImage({
@@ -45,28 +39,9 @@ abstract final class ImageSaverService {
         data = resp.bodyBytes;
       }
       final String fileName = '$baseName.${_detectExt(data, url)}';
-      if (kIsWeb) {
-        // 浏览器:触发下载(自动存入下载目录/询问保存位置)。
-        await FilePicker.saveFile(fileName: fileName, bytes: data);
-        return fileName;
-      }
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        try {
-          final Object? path = await _channel.invokeMethod<Object?>(
-            'saveImage',
-            <String, Object?>{
-              'bytes': data,
-              'fileName': fileName,
-            },
-          );
-          return path is String ? path : fileName;
-        } on PlatformException catch (e) {
-          return e.message ?? '保存失败';
-        }
-      }
-      // 桌面等:系统保存对话框。
-      await FilePicker.saveFile(fileName: fileName, bytes: data);
-      return fileName;
+      final String? saved = await PlatFileOpsRegistry.instance
+          .saveImageToGallery(bytes: data, fileName: fileName);
+      return saved ?? fileName;
     } catch (_) {
       return '保存失败';
     } finally {

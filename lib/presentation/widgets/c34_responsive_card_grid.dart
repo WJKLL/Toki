@@ -178,11 +178,12 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
   String? _flyingId;
   Offset _flightFrom = Offset.zero;
   Offset _flightTo = Offset.zero;
-  late final AnimationController _flight = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 240),
-  )..addListener(_onFlightTick);
-  late Animation<Offset> _flightPos = _buildFlight();
+  // 懒建：首次拖拽飞行才创建 —— late final 会在 dispose 首次访问时触发
+  //   构造(AnimationController→TickerMode 祖先查询→deactivate 异常)。
+  AnimationController? _flight;
+  Animation<Offset> _flightPos = const AlwaysStoppedAnimation<Offset>(
+    Offset.zero,
+  );
 
   Animation<Offset> _buildFlight() {
     // v1.24.5:去 easeOutBack 终点过冲 —— 短距落位时过冲表现为
@@ -190,7 +191,9 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
     return Tween<Offset>(
       begin: _flightFrom,
       end: _flightTo,
-    ).animate(CurvedAnimation(parent: _flight, curve: Curves.easeOutCubic));
+    ).animate(
+      CurvedAnimation(parent: _flight!, curve: Curves.easeOutCubic),
+    );
   }
 
   void _onFlightTick() {
@@ -200,7 +203,7 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
   @override
   void dispose() {
     AppLifecycleController.instance.removeListener(_onAppReset);
-    _flight.dispose();
+    _flight?.dispose();
     super.dispose();
   }
 
@@ -393,9 +396,13 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
       _flightFrom = from;
       _flightTo = to;
     });
+    _flight ??= AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    )..addListener(_onFlightTick);
     _flightPos = _buildFlight();
     unawaited(
-      _flight.forward(from: 0).whenComplete(() {
+      _flight!.forward(from: 0).whenComplete(() {
         if (!mounted) return;
         // v1.24.5:落定直接归位(无收尾缩放),消除「弹一下」。
         setState(() {

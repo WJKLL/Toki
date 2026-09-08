@@ -4,14 +4,13 @@
 
 # Toki（箱具工 → Toki）
 
-**Miuix 风格工具箱（个人使用为主）** · Flutter 应用，Android 11+ / Web
+**Miuix 风格工具箱（个人使用为主）** · Flutter 应用，Android 11+ / Web · **HarmonyOS NEXT（见独立仓库）**
 
 Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：实时待办与流程图编辑器、课程倒计时常驻通知、课表管理、每日一言，以及可扩展的「工具页」（**60+ 个实用工具 / 15 分类**：Steam/MC 查询、必应壁纸、二维码、IP、一言、MD5/Base64/AES、时间戳/农历、翻译、热榜、菜谱、搜索等）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
 
-下载方式：GitHub Release / 蓝奏云:    (https://wwami.lanzouq.com/b01giaeweh 密码:8jpk)
+下载方式：**GitHub Releases**（APK / Web 产物;鸿蒙 HAP 见 [Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS) 的 Releases） / 蓝奏云:    (https://wwami.lanzouq.com/b01giaeweh 密码:8jpk)
 
-
-> 本仓库为项目开源镜像版本，同步自内部开发主线（当前 v1.49.1）。
+> 本仓库为项目开源镜像版本，同步自内部开发主线（当前 v1.49.1）。**HarmonyOS NEXT 移植版独立仓库：[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（源码与 HAP 分离管理）。
 
 ---
 
@@ -47,6 +46,16 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 首页卡片长按编辑态专项演示：
 
 ![长按进入编辑态与 ✕ 移除演示](docs/demo/toki-demo.gif)
+
+**HarmonyOS 适配版完整演示（2026-09-08）：**
+
+> 📹 [GitHub 页面内播放](https://github.com/WJKLL/Toki/blob/main/docs/demo/9月8日.mp4) · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/9月8日.mp4)
+
+---
+
+## 🧩 HarmonyOS NEXT 移植版
+
+源代码不在此仓库,独立维护于 **[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（Flutter-OH 镜像：桌面「今日课程」实况卡片 / 课程提醒 / HUKS 凭证加密等鸿蒙能力），HAP 产物发布在其 Releases。
 
 ---
 
