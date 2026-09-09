@@ -38,19 +38,13 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 ## 🎬 演示
 
-**完整操作演示（2026-09 · 88 秒）** —— 新版本实机录屏：
+**完整操作演示（2026-09-09）** —— 新版本实机录屏（含声音）：
 
-<img src="docs/demo/toki-demo-v2.gif" width="300" alt="Toki 完整使用演示"/>
+[<img src="docs/demo/toki-demo-20260909-cover.jpg" width="320" alt="Toki 完整使用演示（点击播放）"/>](https://github.com/WJKLL/Toki/blob/main/docs/demo/toki-demo-20260909.mp4)
 
-> 📹 完整版（含声音）：[GitHub 页面内播放](https://github.com/WJKLL/Toki/blob/main/docs/demo/VID_20260906_182410.mp4) · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/VID_20260906_182410.mp4)
+> 📹 点击封面播放 · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/toki-demo-20260909.mp4)
 
-首页卡片长按编辑态专项演示：
-
-![长按进入编辑态与 ✕ 移除演示](docs/demo/toki-demo.gif)
-
-**HarmonyOS 适配版完整演示（2026-09-08）：**
-
-> 📹 [GitHub 页面内播放](https://github.com/WJKLL/Toki/blob/main/docs/demo/9月8日.mp4) · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/9月8日.mp4)
+**HarmonyOS NEXT 移植版**：同一套 UI 与数据，平台能力差异见下节；安装包见 [Toki-HarmonyOS Releases](https://github.com/WJKLL/Toki-HarmonyOS/releases)。
 
 ---
 
