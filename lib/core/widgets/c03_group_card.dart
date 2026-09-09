@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 
 import 'card_dark_glow.dart';
+import 'glow_material.dart';
 
 /// 设置页分组卡片：MiuixCard 包裹 [Column]，组内项之间用 MiuixHorizontalDivider 分隔。
 ///
@@ -25,17 +26,26 @@ class C03GroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // PERF/观感:浅色模式不画卡片光感(浅底大面积混合是掉帧主因),仅深色保留。
+    final bool dark =
+        MiuixTheme.of(context).colors.surface.computeLuminance() < 0.5;
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-      // 深色描边光晕(radius 与 MiuixCard 默认圆角 16 对齐;浅色直接透传)。
-      child: CardDarkGlow(
+      // GLOW-02:光感材质层(仅深色;浅色透传零绘制)。
+      // 深色描边光晕(radius 与 MiuixCard 默认圆角 16 对齐)。
+      child: GlowMaterial(
         radius: 16,
-        child: MiuixCard(
-          // MiuixCard 默认 insideMargin=zero，内边距由组内项自行控制。
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
+        enabled: dark,
+        // 档位来自 GlowScope(设置页「沉浸光感」);不传 level → 跟随用户设置。
+        child: CardDarkGlow(
+          radius: 16,
+          child: MiuixCard(
+            // MiuixCard 默认 insideMargin=zero，内边距由组内项自行控制。
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
+            ),
           ),
         ),
       ),

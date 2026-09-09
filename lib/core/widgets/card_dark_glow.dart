@@ -39,11 +39,8 @@ class CardDarkGlow extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(
-          color: white.withValues(alpha: borderAlpha / 255),
-          width: 1,
-        ),
-        // 极弱外发光:深底上给卡片一圈微亮轮廓(静态)。
+        // 1px 白描边已由 GLOW-02 光感层接管(深色描边 + 顶高光线);
+        // 此处只保留极弱外发光(深底上给卡片一圈微亮轮廓,静态)。
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: white.withValues(alpha: glowAlpha / 255),

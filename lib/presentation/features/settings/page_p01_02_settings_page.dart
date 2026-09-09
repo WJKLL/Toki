@@ -35,6 +35,7 @@ import '../../../core/reminder/reminder_service.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/c03_group_card.dart';
 import '../../../core/widgets/c05_warning_card.dart';
+import '../../../core/widgets/glow_tab_row.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../../domain/entities/app_settings.dart';
 import '../../../domain/entities/daily_quote.dart';
@@ -411,11 +412,41 @@ class _PageP0102SettingsPageState extends ConsumerState<PageP0102SettingsPage> {
                 style: MiuixTheme.of(context).textStyles.title4,
               ),
               const SizedBox(height: 10),
-              MiuixTabRow(
+              GlowTabRow(
                 key: const ValueKey('uiMode'),
                 tabs: _uiModeLabels,
                 selectedTabIndex: _uiModeValues.indexOf(settings.uiMode),
                 onTabSelected: (i) => controller.setUiMode(_uiModeValues[i]),
+              ),
+            ],
+          ),
+        ),
+        const C03IndentDivider(),
+        // v1.50.x（GLOW-03）：沉浸光感档位 —— 强度是主观偏好，交给用户自己调。
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MiuixText(
+                '沉浸光感',
+                style: MiuixTheme.of(context).textStyles.title4,
+              ),
+              const SizedBox(height: 4),
+              MiuixText(
+                '卡片与导航组件的边缘光感强度（纯绘制，不影响滚动帧率）',
+                style: MiuixTheme.of(context).textStyles.footnote1,
+                color: MiuixTheme.of(context).colors.onSurfaceVariantSummary,
+              ),
+              const SizedBox(height: 10),
+              GlowTabRow(
+                key: const ValueKey('glowLevel'),
+                tabs: const <String>['关', '标准', '丰富'],
+                selectedTabIndex: settings.glowLevel.clamp(
+                  0,
+                  AppSettings.kGlowLevelMax,
+                ),
+                onTabSelected: controller.setGlowLevel,
               ),
             ],
           ),

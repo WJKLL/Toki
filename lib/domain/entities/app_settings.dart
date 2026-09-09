@@ -40,6 +40,7 @@ class AppSettings {
     this.quoteStyle = 'classic',
     this.quoteLang = 'zh',
     this.courseReminderEnabled = true,
+    this.glowLevel = 1,
   });
 
   /// UI 模式（跟随系统 / 浅色 / 深色）。
@@ -89,6 +90,12 @@ class AppSettings {
   /// v1.36.0：课程提醒总开关（到点闹钟 + 上课常驻通知；默认开）。
   final bool courseReminderEnabled;
 
+  /// v1.50.x（GLOW-03）：沉浸光感档位 —— 0 关 / 1 标准 / 2 丰富。
+  final int glowLevel;
+
+  /// 光感档位取值上限（含）。
+  static const int kGlowLevelMax = 2;
+
   static const double kPageScaleMin = 0.8;
   static const double kPageScaleMax = 1.2;
 
@@ -108,6 +115,7 @@ class AppSettings {
     String? quoteStyle,
     String? quoteLang,
     bool? courseReminderEnabled,
+    int? glowLevel,
   }) {
     return AppSettings(
       uiMode: uiMode ?? this.uiMode,
@@ -124,6 +132,7 @@ class AppSettings {
       quoteStyle: quoteStyle ?? this.quoteStyle,
       quoteLang: quoteLang ?? this.quoteLang,
       courseReminderEnabled: courseReminderEnabled ?? this.courseReminderEnabled,
+      glowLevel: glowLevel ?? this.glowLevel,
     );
   }
 
@@ -144,6 +153,7 @@ class AppSettings {
             other.quoteStyle == quoteStyle &&
             other.quoteLang == quoteLang &&
             other.courseReminderEnabled == courseReminderEnabled &&
+            other.glowLevel == glowLevel &&
             listEquals(other.classPeriods, classPeriods);
   }
 
@@ -162,6 +172,7 @@ class AppSettings {
     quoteStyle,
     quoteLang,
     courseReminderEnabled,
+    glowLevel,
     Object.hashAll(classPeriods),
   );
 }

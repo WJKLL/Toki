@@ -24,6 +24,7 @@ import 'core/refresh_rate/refresh_rate_controller.dart';
 import 'core/tools/tool_catalog_store.dart';
 import 'core/utils/u04_platform_utils.dart';
 import 'core/widgets/app_scroll_behavior.dart';
+import 'core/widgets/glow_material.dart';
 import 'data/repositories/agreement_repository_impl.dart';
 import 'data/repositories/course_repository_impl.dart';
 import 'data/repositories/daily_activity_repository_impl.dart';
@@ -172,10 +173,11 @@ class XiangJuGongApp extends ConsumerWidget {
       child: Builder(
         builder: (context) {
           final MiuixThemeData theme = MiuixTheme.of(context);
-          // v1.18.x（采样自适应）：根部全局捕获一切滚动（含 PageView 切页
-          // 动画、push 二级页滚动）→ scrollActivityProvider 置活动态 →
-          // CaptureHeartbeat 活动档每 2 帧采样（跟手防拖影）、静止回 4 帧省电。
-          return NotificationListener<ScrollNotification>(
+          // v1.50.x（GLOW-03）：把设置里的光感档位注入作用域 ——
+          //   GlowMaterial / 指示框据此决定档位或整体关闭（null = 关）。
+          return GlowScope(
+            level: ref.watch(glowLevelProvider),
+            child: NotificationListener<ScrollNotification>(
             onNotification: (ScrollNotification n) {
               final ScrollActivityController c = ref.read(
                 scrollActivityProvider.notifier,
@@ -237,6 +239,7 @@ class XiangJuGongApp extends ConsumerWidget {
                   ),
                 );
               },
+            ),
             ),
           );
         },

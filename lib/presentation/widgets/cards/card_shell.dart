@@ -17,6 +17,7 @@ import 'package:flutter_miuix/miuix.dart';
 
 import '../../../core/utils/u04_platform_utils.dart';
 import '../../../core/widgets/card_dark_glow.dart';
+import '../../../core/widgets/glow_material.dart';
 
 /// 首页卡片统一阴影壳(双层悬浮阴影 + 暗色高光)。
 /// [radius] 阴影形状圆角 —— 与内卡圆角对齐,避免阴影露出直角/缺角;
@@ -104,8 +105,18 @@ class CardShadow extends StatelessWidget {
       child: child,
     );
     // v1.44.x:暗色高光内建 —— CardDarkGlow 浅色透传(零开销),深色在
-    // 阴影 DecoratedBox 外侧叠 1px 白描边 + 微光晕(外投影 + 内描边分层)。
+    // 阴影 DecoratedBox 外侧叠微光晕(外投影 + 内描边分层)。
     if (!darkGlow) return shadowed;
-    return CardDarkGlow(radius: radius, child: shadowed);
+    // v1.50.x(GLOW-02):叠一层**静态光感材质** ——
+    //   深色:边缘层次 + 顶高光线;浅色:按用户决定不画(浅底大面积混合掉帧)。
+    //   性能:纯 Canvas 绘制,**零额外模糊 pass**;shouldRepaint=false 静态零重绘。
+    return GlowMaterial(
+      radius: radius,
+      enabled: dark,
+      // 档位来自 GlowScope(设置页「沉浸光感」);不传 level → 跟随用户设置。
+      // P2-2:开启按压光圈(Listener 惰性创建 AnimationController,松手即停)。
+      interactive: true,
+      child: CardDarkGlow(radius: radius, child: shadowed),
+    );
   }
 }

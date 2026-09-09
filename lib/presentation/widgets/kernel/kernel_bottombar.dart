@@ -19,6 +19,8 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 
+import '../../../../core/widgets/glow_material.dart';
+import '../../../../core/widgets/glow_tokens.dart';
 import 'blur.dart';
 import 'damped_drag.dart';
 import 'dual_peak_highlight.dart';
@@ -522,6 +524,31 @@ class _KernelFloatingBottomBarState extends State<KernelFloatingBottomBar>
       offset: Offset(0, 8 * press),
       child: indicator,
     );
+
+    // GLOW-02:液态指示框叠一层光感(保留折射/内阴影/按压高光,仅加一层纯绘制)。
+    //   形状同为胶囊(StadiumBorder);档位来自设置(GLOW-03),「关」→ 不构造。
+    final GlowScope? glowScope = GlowScope.maybeOf(context);
+    final GlowLevel? glowLevel = glowScope == null
+        ? GlowLevel.gentle
+        : glowScope.level;
+    if (glowLevel != null) {
+      indicator = Stack(
+        children: <Widget>[
+          indicator,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: GlowIndicatorPainter(
+                  dark: isDark,
+                  level: glowLevel,
+                  shape: const StadiumBorder(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
     // 按 stadium 裁剪指示框整体（参考项目 drawBackdrop shape=pillShape 也是胶囊形，
     // 否则 LensRefraction 的 clipRect 直角矩形会在胶囊四角外露出方形页面背景）。

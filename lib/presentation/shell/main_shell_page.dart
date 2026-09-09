@@ -32,6 +32,8 @@ import '../../core/utils/u03_blur_policy.dart';
 import '../../core/utils/u04_platform_utils.dart';
 import '../../core/widgets/app_icons.dart';
 import '../../core/widgets/c15_page_scale_container.dart';
+import '../../core/widgets/glow_material.dart';
+import '../../core/widgets/glow_tokens.dart';
 import '../../domain/entities/app_settings.dart';
 import '../features/home/page_p01_01_home_page.dart';
 import '../features/todo/page_p10_todo_page.dart';
@@ -556,17 +558,51 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
     );
   }
 
-  MiuixNavigationRailItem _railItem(
+  /// 单个侧边栏项;选中项外包 Stack 叠一层光感指示框(见 GLOW-02)。
+  Widget _railItem(
     int index,
     String iconName,
     String label,
     int currentIndex,
   ) {
-    return MiuixNavigationRailItem(
-      selected: currentIndex == index,
+    final bool selected = currentIndex == index;
+    final Widget item = MiuixNavigationRailItem(
+      selected: selected,
       onPressed: () => _onDestinationSelected(index),
       icon: MiuixIcon(vector: appIcon(iconName), size: 22),
       label: label,
+    );
+    if (!selected) {
+      return item;
+    }
+    // 档位来自 App 顶层注入的 GlowScope(GLOW-03);null = 用户关闭光感。
+    final GlowScope? scope = GlowScope.maybeOf(context);
+    final GlowLevel? glowLevel = scope == null ? GlowLevel.gentle : scope.level;
+    if (glowLevel == null) {
+      return item;
+    }
+    // GLOW-02:选中项指示框叠一层光感(形状/圆角与 Miuix 指示框一致:
+    //   cornerRadius 16 = MiuixNavigationRailDefaults.expandedItemCornerRadius;
+    //   左右 margin 12 = expandedItemHorizontalMargin)。
+    return Stack(
+      fit: StackFit.passthrough,
+      children: <Widget>[
+        item,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: CustomPaint(
+                painter: GlowIndicatorPainter(
+                  dark: MiuixTheme.of(context).brightness == Brightness.dark,
+                  level: glowLevel,
+                  shape: const MiuixSquircleBorder(cornerRadius: 16),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

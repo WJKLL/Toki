@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/logging/app_log_service.dart';
 import '../../core/utils/u03_blur_policy.dart';
+import '../../core/widgets/glow_tokens.dart';
 import '../../domain/entities/app_settings.dart';
 import '../../domain/entities/class_period.dart';
 import '../../domain/entities/daily_quote.dart';
@@ -79,6 +80,11 @@ class AppSettingsController extends Notifier<AppSettings> {
 
   void setBlurEnabled(bool enabled) =>
       _update(state.copyWith(blurEnabled: enabled));
+
+  /// v1.50.x(GLOW-03):沉浸光感档位(0 关 / 1 标准 / 2 丰富)。
+  void setGlowLevel(int level) => _update(
+    state.copyWith(glowLevel: level.clamp(0, AppSettings.kGlowLevelMax)),
+  );
 
   /// v1.21.0:节次时间表整表替换(16 项;UI 每次行提交 → 防抖单次落盘)。
   void setClassPeriods(List<ClassPeriod> periods) =>
@@ -217,6 +223,16 @@ final effectiveBlurProvider = Provider<bool>((ref) {
     isWeb: platform.isWeb,
     androidSdkInt: platform.androidSdkInt,
   );
+});
+
+/// 沉浸光感档位(GLOW-03):0 关 / 1 标准 / 2 丰富 → [GlowLevel]?(null = 关闭)。
+final glowLevelProvider = Provider<GlowLevel?>((ref) {
+  final int raw = ref.watch(appSettingsProvider.select((s) => s.glowLevel));
+  return switch (raw) {
+    1 => GlowLevel.gentle, // 标准
+    >= 2 => GlowLevel.exquisite, // 丰富(旧值 3 一并归此)
+    _ => null, // 关
+  };
 });
 
 /// 毛玻璃降级说明（设置页 summary / 警告卡用）。

@@ -28,6 +28,8 @@ class SettingsRepositoryImpl implements SettingsRepository {
   static const String _kFloatingBarEnabled = 'settings.floatingBarEnabled';
   static const String _kPageScale = 'settings.pageScale';
   static const String _kLogCaptureEnabled = 'settings.logCaptureEnabled';
+  // v1.50.x(GLOW-03):沉浸光感档位(0 关 / 1 标准 / 2 丰富)。
+  static const String _kGlowLevel = 'settings.glowLevel';
   // v1.21.0:全局节次时间表(16 项 JSON 单串,<1KB)。
   static const String _kClassPeriods = 'settings.classPeriods';
   // v1.22.0:首页网格卡顺序(id 列表 JSON,<300B)。
@@ -64,6 +66,10 @@ class SettingsRepositoryImpl implements SettingsRepository {
       keyColor: keyColorInt == null ? null : Color(keyColorInt),
       paletteStyle: palette ?? 'tonalSpot',
       blurEnabled: _prefs.getBool(_kBlurEnabled) ?? true,
+      glowLevel: (_prefs.getInt(_kGlowLevel) ?? 1).clamp(
+        0,
+        AppSettings.kGlowLevelMax,
+      ),
       // 🔧 修复（S-02）：悬浮底栏开关持久化读取——应用启动时恢复上次状态
       //    （main() → ProviderScope 注入 → AppSettingsController.build → load()）。
       floatingBarEnabled: _prefs.getBool(_kFloatingBarEnabled) ?? false,
@@ -122,6 +128,7 @@ class SettingsRepositoryImpl implements SettingsRepository {
     }
     await _prefs.setString(_kPaletteStyle, s.paletteStyle);
     await _prefs.setBool(_kBlurEnabled, s.blurEnabled);
+    await _prefs.setInt(_kGlowLevel, s.glowLevel);
     // 🔧 修复（S-02）：悬浮底栏开关持久化写回（防抖合并后批量落盘）。
     await _prefs.setBool(_kFloatingBarEnabled, s.floatingBarEnabled);
     await _prefs.setDouble(_kPageScale, s.pageScale);
