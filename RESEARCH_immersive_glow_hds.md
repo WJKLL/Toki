@@ -1,122 +1,151 @@
-﻿# 璋冪爺:娌夋蹈鍏夋劅(HDS)鍙傛暟瀵归綈鍒嗘瀽
+# 调研:沉浸光感(HDS)参数对齐分析
 
-> 2026-07 璋冪爺,浠呰緭鍑哄垎鏋?**鏈惤鍦颁换浣曚唬鐮?*銆?> 鑳屾櫙:璇勪及 Flutter 渚ф帴鍏ラ缚钂?娌夋蹈鍏夋劅"鐨勫彲琛屾€с€傝皟鐮斿璞′负绀惧尯鍖?> `harmony_immersive_glow`(GitCode,绾?Dart 杩戜技)涓?`ohos_immersive_light`(鍘熺敓鎻掍欢鑼冧緥)銆?> 缁撹鍏堣:**绯荤粺绾у厜鎰熸棤娉曟帴鍏?缁勪欢绾?HDS 绯荤粺鏉愯川浠呭師鐢熷彲鐢?Flutter 渚у敮涓€鐜板疄璺緞 =
-> 鑷粯杩戜技,涓旀湰椤圭洰宸叉湁 80% 鍩虹璁炬柦(蹇収/棰勬ā绯?鎶樺皠/鍙屽嘲楂樺厜),宸窛闆嗕腑鍦?鍏夋睜/鎵厜/浜や簰鍏夊湀"涓?鑳藉姏闂ㄧ鍒嗙骇"銆?*
+> 2026-07 调研,仅输出分析,**未落地任何代码**。
+> 背景:评估 Flutter 侧接入鸿蒙"沉浸光感"的可行性。调研对象为社区包
+> `harmony_immersive_glow`(GitCode,纯 Dart 近似)与 `ohos_immersive_light`(原生插件范例)。
+> 结论先行:**系统级光感无法接入;组件级 HDS 系统材质仅原生可用;Flutter 侧唯一现实路径 =
+> 自绘近似,且本项目已有 80% 基础设施(快照/预模糊/折射/双峰高光),差距集中于"光池/扫光/交互光圈"与"能力门禁分级"。**
 
 ---
 
-## 1. 浜嬪疄鏍稿疄(鏉ユ簮)
+## 1. 事实核实(来源)
 
-| 椤?| 鏍稿疄缁撴灉 |
+| 项 | 核实结果 |
 |---|---|
-| `harmony_immersive_glow` | 鉁?鐪熷疄瀛樺湪銆侴itCode `ZuoYueLiang/harmony_immersive_glow_tabbar`(MIT,绾?Dart,git 渚濊禆,鏃?pub 鍙戝竷)銆備綔鑰呰嚜杩?浠?杩戜技",**涓嶆槸 ArkUI 绯荤粺鏉愯川 API 鐨勭粦瀹?*;鐪熷疄 HDS 鐢?`@kit.UIDesignKit` 鎻愪緵 |
-| `ohos_immersive_light` | 鉁?鐪熷疄瀛樺湪銆侳lutter-OH 鎻掍欢寮€鍙戣寖渚?CSDN 2026-06-05 瀹炴垬鏁欑▼,Windows 韪╁潙:example 涓嶅彲鐢ㄩ渶鑷缓宸ョ▼銆佸繀椤?`path:` 鏈湴渚濊禆) |
-| 鍘熺敓鑳藉姏鐪熻韩 | `HdsTabsFloatingStyle.systemMaterialEffect` / 鏍囬鏍?`systemMaterialEffect`(HDS 缁勪欢绾х郴缁熸潗璐?API 23+)+ 闂ㄧ `hdsMaterial.getSystemMaterialTypes()`(鍚?`MaterialType.IMMERSIVE` 鎵嶅厑璁?GENTLE/EXQUISITE,鍚﹀垯鍥為€€ SMOOTH) |
-| 涓変釜闄愬埗 | 鉁?鍧囧睘瀹?API 23+銆佸崕涓虹嫭鍗?OpenHarmony 涓嶅彲鐢?銆佺涓夋柟涓嶅彲璋冪郴缁熺骇鍏夋劅鎶樺皠(pointLight 涓?System API) |
-| Flutter 渚у樊寮?| 鍘熸枃妗ｆ槑纭?Flutter `BackdropFilter` 涓?ArkUI 绯荤粺鏉愯川**涓嶅湪鍚屼竴鍚堟垚绠＄嚎**,閲囨牱鑼冨洿/杈圭紭瑁佸壀/鑳藉姏闂ㄧ/璁惧绛栫暐鍧囦笉鍚?|
+| `harmony_immersive_glow` | ✅ 真实存在。GitCode `ZuoYueLiang/harmony_immersive_glow_tabbar`(MIT,纯 Dart,git 依赖,无 pub 发布)。作者自述"近似",**不是 ArkUI 系统材质 API 的绑定**;真实 HDS 由 `@kit.UIDesignKit` 提供 |
+| `ohos_immersive_light` | ✅ 真实存在。Flutter-OH 插件开发范例(CSDN 2026-06-05 实战教程,Windows 踩坑:example 不可用需自建工程、必须 `path:` 本地依赖) |
+| 原生能力真身 | `HdsTabsFloatingStyle.systemMaterialEffect` / 标题栏 `systemMaterialEffect`(HDS 组件级系统材质,API 23+)+ 门禁 `hdsMaterial.getSystemMaterialTypes()`(含 `MaterialType.IMMERSIVE` 才允许 GENTLE/EXQUISITE,否则回退 SMOOTH) |
+| 三个限制 | ✅ 均属 API 23+、华为独有(OpenHarmony 不可用)、第三方不可调系统级光感折射(pointLight 是 System API) |
+| Flutter 侧差异 | 原文档明确:Flutter `BackdropFilter` 与 ArkUI 系统材质**不在同一合成管线**,采样范围/边缘裁剪/能力门禁/设备策略均不一致 |
 
-**鍙傝€冧粨搴撳厠闅嗕綅缃?*:`<research-tree>/harmony_immersive_glow/`
-鏍稿績鏂囦欢:`lib\harmony_immersive_glow.dart`(1359 琛?銆乣docs\native_hds_compare.md`銆乣README.md`銆?
+**参考仓库克隆位置**:`<research-tree>/harmony_immersive_glow/`
+核心文件:`lib\harmony_immersive_glow.dart`(1359 行)、`docs\native_hds_compare.md`、`README.md`。
+
 ---
 
-## 2. 鍙傝€冨疄鐜版媶瑙?鍙傛暟鍏ㄨ〃)
+## 2. 参考实现拆解(参数全表)
 
-### 2.1 绛夌骇 脳 6 鍙傛暟(婧愮爜 `_HarmonyGlowMaterialPainter` / level extension)
+### 2.1 等级 × 6 参数(源码 `_HarmonyGlowMaterialPainter` / level extension)
 
-| 绛夌骇 | blurSigma | fillOpacity(鐧藉簳) | glowOpacity(鍏夋睜) | shadowOpacity | specularOpacity(鎵厜) | scatterOpacity(鏁ｅ皠) |
+| 等级 | blurSigma | fillOpacity(白底) | glowOpacity(光池) | shadowOpacity | specularOpacity(扫光) | scatterOpacity(散射) |
 |---|---|---|---|---|---|---|
 | `smooth` | **8** | .58 | .05 | .08 | .12 | .08 |
 | `gentle` | **22** | .30 | .28 | .16 | .38 | **.90** |
 | `exquisite` | **34** | .13 | .34 | .24 | .48 | .48 |
-| `adaptive` | 22(璺熼殢 gentle) | | | | | |
+| `adaptive` | 22(跟随 gentle) | — | — | — | — | — |
 
-`adaptive` 鐗规畩:绯荤粺"鍑忓急鍔ㄧ敾"(disableAnimations)鈫?鑷姩瑙ｆ瀽涓?`smooth`,鍚﹀垯 `gentle`銆?
-### 2.2 鑳藉姏闂ㄧ(Flutter 渚ч€傞厤)
+`adaptive` 特殊:系统"减弱动画"(disableAnimations)→ 自动解析为 `smooth`,否则 `gentle`。
+
+### 2.2 能力门禁(Flutter 侧适配)
 
 ```dart
 harmonyGlowLevelForCapability(supportsImmersiveMaterial, preferExquisite)
-// 涓嶆敮鎸?鈫?smooth;鏀寔 鈫?exquisite(鎴?preferExquisite:false 鈫?gentle)
+// 不支持 → smooth;支持 → exquisite(或 preferExquisite:false → gentle)
 ```
 
-- 鍘熺敓渚?`hdsMaterial.getSystemMaterialTypes()` 杩斿洖鍚?`MaterialType.IMMERSIVE` 鎵嶅厑璁?GENTLE/EXQUISITE;
-- **Flutter 渚т笉鑳界洿鎺ユ煡璇㈣ ArkUI API**,鍙傝€冨寘閫氳繃瀹夸富娉ㄥ叆(`harmonyGlowLevelForCapability` 鍏ュ弬)瀹炵幇闂ㄧ鈥斺€旀湰椤圭洰 搂9 `plat` 鑳藉姏灞傚凡璁″垝鎵挎媴姝よ亴璐ｃ€?- `HarmonyGlowEffectTuning` 涓?7 涓箻瀛?`blurScale/surfaceScale/glowScale/shadowScale/specularScale/elasticScale/scatterScale`),鍦ㄧ瓑绾у熀纭€涓婁簩娆″井璋?涓嶆敼鍙樼瓑绾ц涔夈€?
-### 2.3 璋冭壊鏉?榛樿)
+- 原生侧 `hdsMaterial.getSystemMaterialTypes()` 返回含 `MaterialType.IMMERSIVE` 才允许 GENTLE/EXQUISITE;
+- **Flutter 侧不能直接查询该 ArkUI API**,参考包通过宿主注入(`harmonyGlowLevelForCapability` 入参)实现门禁——本项目 §9 `plat` 能力层已计划承担此职责;
+- `HarmonyGlowEffectTuning` 含 7 个乘子(`blurScale/surfaceScale/glowScale/shadowScale/specularScale/elasticScale/scatterScale`),在等级基础上二次微调,不改变等级语义。
 
-| token | 鍊?| 璇箟 |
+### 2.3 调色板(默认)
+
+| token | 值 | 语义 |
 |---|---|---|
-| `surfaceTint` | `#FFFFFF` | 鏉愯川搴?|
-| `edgeHighlight` | `#E6FFFFFF` | 涓?澶栫紭楂樺厜鎻忚竟 |
-| `edgeShadow` | `#24000000` | 涓嬬紭/鎶曞奖 |
-| `activeColor` | `#1476FF` | 閫変腑鍥炬爣/鏂囧瓧 |
-| `inactiveColor` | `#15171A` | 鏈€変腑 |
-| `glowColors` | `#72E3C0` / `#7C8DF7` / `#FFC178` | 涓夎壊鍏夋睜(闈掔豢/闈涚传/鐞ョ弨) |
+| `surfaceTint` | `#FFFFFF` | 材质底色 |
+| `edgeHighlight` | `#E6FFFFFF` | 上/外缘高光描边 |
+| `edgeShadow` | `#24000000` | 下缘/投影 |
+| `activeColor` | `#1476FF` | 选中图标/文字 |
+| `inactiveColor` | `#15171A` | 未选中 |
+| `glowColors` | `#72E3C0` / `#7C8DF7` / `#FFC178` | 三色光池(青绿/靛紫/琥珀) |
 
-### 2.4 鏉愯川灞傛覆鏌撶粨鏋?姣忓抚)
+### 2.4 材质层渲染结构(每帧)
 
 ```
-[DecoratedBox: boxShadow(0,12) blur 12|24 脳 shadowScale]
-鈹斺攢 ClipRRect
-   鈹斺攢 Stack
-      鈹溾攢 BackdropFilter(blur 蟽)                    鈫?涓绘ā绯?姣忓抚瀹炴椂
-      鈹溾攢 _HarmonyBackdropScatter(scatter>0 鏃?      鈫?3 璺?
-      鈹?   鈹溾攢 ImageFilter.matrix 涓績鏀惧ぇ 脳(1+.035c, 1+.012c) + 鐧?tint .028c
-      鈹?   鈹溾攢 blur(蟽x=蟽(.65+.32c)鈮?2, 蟽y=蟽(.18+.08c)鈮?6) 骞崇Щ 鈭?c + tint .018c
-      鈹?   鈹溾攢 blur(鍚屄废兠?78) 骞崇Щ 鈭?c + tint .014c
-      鈹?   鈹斺攢 _ScatterVeilPainter:4 鐧界珫妞渾甯?screen, 鐩镐綅婕傜Щ 卤4px)
-      鈹溾攢 CustomPaint(_HarmonyGlowMaterialPainter)
-      鈹?   鈹溾攢 鐧藉簳 fill(蟽 fillOpacity脳surfaceScale)
-      鈹?   鈹溾攢 鍏夋睜:3 鑹?RadialGradient(plus) 浜害 .38/.1, 鍗婂緞 .55+.08i, 鐩镐綅鍦嗗懆婕傜Щ 9%瀹?12%楂?      鈹?   鈹溾攢 鎵厜:鐧?RadialGradient(screen) 妯悜鎵姩 68%瀹?150%楂?      鈹?   鈹斺攢 杈圭紭:1.1px LinearGradient(椤?.9鈫?2鈫掑簳 .26) + 椤堕珮鍏夌嚎(.7, 12px inset)
-      鈹斺攢 Material(transparency) + child
+[DecoratedBox: boxShadow(0,12) blur 12|24 × shadowScale]
+└─ ClipRRect
+   └─ Stack
+      ├─ BackdropFilter(blur σ)                    → 主模糊(每帧实时)
+      ├─ _HarmonyBackdropScatter(scatter>0 时)     → 3 层
+      │   ├─ ImageFilter.matrix 中心放大 ×(1+.035c, 1+.012c) + 白 tint .028c
+      │   ├─ blur(σx=σ(.65+.32c)≥2, σy=σ(.18+.08c)≥6) 平移 ±c + tint .018c
+      │   ├─ blur(同 ·σ≥.78) 平移 ±c + tint .014c
+      │   └─ _ScatterVeilPainter:4 白竖椭圆(screen, 相位漂移 ±4px)
+      ├─ CustomPaint(_HarmonyGlowMaterialPainter)
+      │   ├─ 白底 fill(σ fillOpacity×surfaceScale)
+      │   ├─ 光池:3 色 RadialGradient(plus) 亮度 .38/.1, 半径 .55+.08i, 相位圆周漂移 9%宽/12%高
+      │   ├─ 扫光:白 RadialGradient(screen) 横向扫动 68%宽/150%高
+      │   └─ 边缘:1.1px LinearGradient(顶 .9→中 .2→底 .26) + 顶高光线(.7, 12px inset)
+      └─ Material(transparency) + child
 ```
 
-### 2.5 浜や簰(鎮诞搴曟爮涓撳睘,鎸夐渶)
+### 2.5 交互(悬浮底栏专属,按需)
 
-鎸夊帇鈫掑厜鍦?3 鑹?caustic + 鐧?lens 楂樺厜)+ 寮圭哀 ticker(stiffness 68+24e / damping 14+4(1-e), 浣嶇疆 clamp 卤1.12,鎷栨嫿 pull clamp 卤.24/.18)+ 鏁翠綋 scale 鎷変几(1+.34H+.035V / 1+.24V鈭?025H);鍥炬爣鎸夊帇 `.88 / 80ms`銆佸洖寮?`elasticOut / 360ms`;鏉炬墜 `interactionFadeDuration 260ms reverse`銆傞€変腑鎬佸垏鎹?*鏁呮剰涓嶅啀琛ョ櫧 flash**(瀵归綈鍘熺敓 HDS 鍙湁鎸夊帇涓湁鐧借壊鍏夊湀)銆?
-### 2.6 鎬ц兘鎴愭湰(閲嶈)
+按压→光池(3 色 caustic + 白 lens 高光)+ 弹簧 ticker(stiffness 68+24e / damping 14+4(1-e), 位置 clamp ±1.12,拖拽 pull clamp ±.24/.18)+ 整体 scale 拉伸(1+.34H+.035V / 1+.24V−.025H);图标按压 `.88 / 80ms`、回弹 `elasticOut / 360ms`;松手 `interactionFadeDuration 260ms reverse`。选中态切换**故意不再补白 flash**(对齐原生 HDS 只有按压中有白色光圈)。
 
-姣忓抚鍚?**3 涓?BackdropFilter**(1 涓?+ 2 鏁ｅ皠 blur)+ 1 涓?`ImageFilter.matrix` + 4 甯?CustomPaint,鏃犵紦瀛樷€斺€擿exquisite`(蟽34 + 楂?scatter)鈮?姣忓抚 3 娆￠珮鏂灞?pass,浣庣璁惧婧环鏄庢樉銆俁EADME 鑷堪:浣庣搴斿洖閫€ `smooth`;`BackdropFilter` 闇€鍚庢柟鐪熷疄鍐呭(绾壊鑳屾櫙鏁堟灉寮?銆?
----
+### 2.6 性能成本(重要)
 
-## 3. 椤圭洰鐜版湁鑳藉姏鐩樼偣
-
-鍙岀涓€鑷?闀滃儚涓庝富椤圭洰 kernel/shaders **閫愭枃浠跺搱甯?SAME**;闀滃儚浠呭 main.dart shader 棰勭儹):
-
-| 鑳藉姏 | 浣嶇疆 | 鐜扮姸 |
-|---|---|---|
-| 鑳屾櫙蹇収浣撶郴 | `MiuixLayerBackdrop`(flutter_miuix) | 蹇収 + globalOffset + **pixelRatio 鍙檷閲囨牱**,椹卞姩鍏ㄩ儴鑷爺妯＄硦/鎶樺皠 |
-| 棰勬ā绯婄紦瀛?| `kernel/blur.dart` `BackdropBlur`(+ `c27_prefrosted_blur.dart`) | **P0 缂撳瓨**:蹇収/閲囨牱鍖?鍗婂緞涓嶅彉鏃跺鐢ㄦā绯婄汗鐞?姣忓抚浠?drawImageRect鈥斺€斿凡鍦ㄥ垏椤?鎸夊帇涓牴娌绘瘡甯ч珮鏂姈鍔?鍙傝€冨寘鏃犳浼樺寲 |
-| 杈圭紭鎶樺皠 | `kernel/lens.dart` `LensRefraction` + `shaders/lens_refraction.frag` | 杈圭紭鎶樺皠(鈭?0dp)/褰╄櫣/娴佸姩/娣卞害,鍙?backdrop(椤甸潰+搴曟爮鐜荤拑);鍙傛暟涓?shader 鍧囧弻绔悓婧?|
-| 鍙屽嘲楂樺厜 | `kernel/dual_peak_highlight.dart` + `shaders/bloom_dual_peak.frag` | 鏂瑰悜鍙屽厜(primary/secondary,180掳 瀵瑰嘲),`LightSource` position/intensity/color + innerBlur + blendMode鈥斺€斾笌 HDS"鐐瑰嚮鍏夊湀/楂樺厜"鍚屾瀯 |
-| 姣涚幓鐠冪粍浠?| `c22_mask_selection_bar` / `c23_push_collapsing_header` / `c24_frosted_fab` / `c25_frosted_top_bar`(瀹樻柟姣涚幓鐠? | U-03 绛栫暐缁熶竴绠℃帶 |
-| 妯＄硦绛栫暐 | `core/utils/u03_blur_policy.dart` | **sigma 鈮?20**銆侀潰绉?鈮?40% 瑙嗗彛銆丄ndroid 13+ 寮€ / Web 绂?**OH 鏃?androidSdkInt(鍒?null)鈫?褰撳墠榛樿鍏佽** |
-| 闃诲凹鎷栨嫿 | `kernel/damped_drag.dart` | 宸叉湁(鍙綔寮规€?ticker 鍙傝€? |
-| 涓婚 | `main.dart` `_shellTheme` seedColor = `theme.colors.primary`(MiuixThemeData 娲剧敓);Miuix 宸查摵 56 鏂囦欢 | 涓婚 token 鍗曚竴鏉ユ簮 = Miuix |
-| shader 棰勭儹 | 浠呴暅鍍?`main.dart` `_warmupShaders`(lens_refraction + bloom_dual_peak) | 涓婚」鐩噿鍔犺浇(棣栨浣跨敤 `FragmentProgram.fromAsset`);Impeller/Vulkan 鍐风紪璇戦娆″崱椤?|
-| 鍗＄墖闃村奖 | `card_shell.dart` | 宸叉湁瀹藉睆(鈮?00px)闄嶇骇 tier(blur/offset 鍑忓崐) |
+每帧含 **3 个 BackdropFilter**(1 个主 + 2 个散射 blur)+ 1 个 `ImageFilter.matrix` + 4 层 CustomPaint,无缓存——`exquisite`(σ34 + 高 scatter)≈ 每帧 3 次高斯离屏 pass,低端设备代价明显。README 自述:低端应回退 `smooth`;`BackdropFilter` 需后方真实内容(纯色背景效果弱)。
 
 ---
 
-## 4. 鑳藉姏瀵圭収鐭╅樀
+## 3. 项目现有能力盘点
 
-| # | HDS 鍏夋劅瑕佺礌 | 鍙傝€冨寘瀹炵幇 | 鏈」鐩凡鏈?| 缁撹 |
+双端一致(镜像与主项目 kernel/shaders **逐文件哈希 SAME**;镜像仅多 main.dart shader 预热):
+
+| 能力 | 位置 | 现状 |
+|---|---|---|
+| 背景快照体系 | `MiuixLayerBackdrop`(flutter_miuix) | 快照 + globalOffset + **pixelRatio 可降采样**,驱动全部自研模糊/折射 |
+| 预模糊缓存 | `kernel/blur.dart` `BackdropBlur`(+ `c27_prefrosted_blur.dart`) | **P0 缓存**:快照/采样区/半径不变时复用模糊纹理,每帧仅 `drawImageRect`——已在切页/按压中根治每帧高斯抖动;参考包无此优化 |
+| 边缘折射 | `kernel/lens.dart` `LensRefraction` + `shaders/lens_refraction.frag` | 边缘折射(≈10dp)/彩虹/流动/深度,可 backdrop(页面+底栏玻璃);参数与 shader 均双端同源 |
+| 双峰高光 | `kernel/dual_peak_highlight.dart` + `shaders/bloom_dual_peak.frag` | 方向双光(primary/secondary,180° 对峰),`LightSource` position/intensity/color + innerBlur + blendMode——与 HDS"点击光圈/高光"同构 |
+| 毛玻璃组件 | `c22_mask_selection_bar` / `c23_push_collapsing_header` / `c24_frosted_fab` / `c25_frosted_top_bar`(官方毛玻璃) | U-03 策略统一管控 |
+| 模糊策略 | `core/utils/u03_blur_policy.dart` | **sigma ≤ 20**、面积 ≤ 40% 视口、Android 13+ 开 / Web 关;**OH 无 androidSdkInt(判 null)→ 当前默认允许** |
+| 阻尼拖拽 | `kernel/damped_drag.dart` | 已有(可作弹性 ticker 参考) |
+| 主题 | `main.dart` `_shellTheme` seedColor = `theme.colors.primary`(MiuixThemeData 派生);Miuix 已铺 56 文件 | 主题 token 单一来源 = Miuix |
+| shader 预热 | 仅镜像 `main.dart` `_warmupShaders`(lens_refraction + bloom_dual_peak) | 主项目懒加载(首次使用 `FragmentProgram.fromAsset`);Impeller/Vulkan 冷编译首次卡顿 |
+| 卡片阴影 | `card_shell.dart` | 已有宽屏(≥600px)降级 tier(blur/offset 减半) |
+
+---
+
+## 4. 能力对照矩阵
+
+| # | HDS 光感要素 | 参考包实现 | 本项目已有 | 结论 |
 |---|---|---|---|---|
-| 1 | 鑳屾櫙妯＄硦(涓绘潗璐? | BackdropFilter 蟽8鈥?4 | `BackdropBlur` + P0 缂撳瓨 | 鉁?**宸叉湁涓旀洿浼?*(缂撳瓨;蟽 涓婇檺寰?U-03 瑁佸喅) |
-| 2 | 鏁ｅ皠/鏀惧ぇ鎰?| matrix 鏀惧ぇ 1.035 + 2 璺?blur 骞崇Щ + 鐧?veil | `LensRefraction`(杈圭紭鎶樺皠,闈炴暣闈㈡斁澶? | 鈿狅笍 閮ㄥ垎:鏁撮潰寰斁澶ч渶鏂?scatter 鑳藉姏(鍙墿 lens shader 鎴栨柊澧炲皬 shader) |
-| 3 | 褰╄壊鍏夋睜 | 3 鑹?radial(plus)鐩镐綅婕傜Щ | `DualPeakHighlight`(鏂瑰悜鍏?闈炲厜姹? | 鈿狅笍 闇€鏂?painter(绠€鍗?radial 寰幆,浣庢垚鏈? |
-| 4 | 鎵厜/楂樺厜 sweep | 鐧?radial 妯壂(screen) | 闈欐€佸弻宄伴珮鍏?| 鈿狅笍 闇€ animationValue 椹卞姩(鐜版湁 shader 鍙鐢?鎺ュ姩鐢诲嵆鍙? |
-| 5 | 杈圭紭鎻忚竟 + 椤跺厜绾?| 1.1px 娓愬彉 + 椤剁嚎 .7 | `inner_shadow`(鏆楄竟) | 鈿狅笍 鏂板楂樺厜杈?灏?painter/閲嶇粯) |
-| 6 | 鎸夊帇鍏夊湀(鐧?lens) | 鐧?radial + 寮圭哀 ticker | 鈥?Miuix 鎸夊帇楂樹寒鑳藉姏鏈夐檺) | 鉂?闇€鏂板(浜や簰) |
-| 7 | 鎷栨嫿浜岀淮寮规€у舰鍙?| spring ticker + scale 鎷変几 | `damped_drag.dart` | 鈿狅笍 鏈夊熀纭€浠?闇€鎺ュ叆鏉愯川灞?|
-| 8 | 鍥炬爣鐐瑰嚮寮规€?| .88 / 80ms, elasticOut 360ms | Miuix 缁勪欢鑷甫 | 鉁?鏃犻渶寮€鍙?|
-| 9 | 鑳藉姏闂ㄧ鍒嗙骇 | getSystemMaterialTypes + levelForCapability + disableAnimations | 鈥?搂9 plat capability 璁″垝涓? | 鉂?灞?搂9 `plat_visual_tokens` 鑼冪暣 |
+| 1 | 背景模糊(主材质) | BackdropFilter σ8–34 | `BackdropBlur` + P0 缓存 | ✅ **已有且更优**(缓存;σ 上限待 U-03 裁决) |
+| 2 | 散射/放大感 | matrix 放大 1.035 + 2 路 blur 平移 + 白 veil | `LensRefraction`(边缘折射,非整面放大) | ⚠️ 部分:整面微放大需新 scatter 能力(可扩 lens shader 或新增小 shader) |
+| 3 | 彩色光池 | 3 色 radial(plus)相位漂移 | `DualPeakHighlight`(方向光,非光池) | ⚠️ 需新 painter(简单 radial 循环,低成本) |
+| 4 | 扫光/高光 sweep | 白 radial 横扫(screen) | 静态双峰高光 | ⚠️ 需 animationValue 驱动(现有 shader 可复用,接动画即可) |
+| 5 | 边缘描边 + 顶光线 | 1.1px 渐变 + 顶线 .7 | `inner_shadow`(暗边) | ⚠️ 新增高光边(小 painter/重绘) |
+| 6 | 按压光圈(白 lens) | 白 radial + 弹簧 ticker | 无(Miuix 按压高亮能力有限) | ❌ 需新增(交互) |
+| 7 | 拖拽二维弹性形变 | spring ticker + scale 拉伸 | `damped_drag.dart` | ⚠️ 有基础件,需接入材质层 |
+| 8 | 图标点击弹性 | .88 / 80ms, elasticOut 360ms | Miuix 组件自带 | ✅ 无需开发 |
+| 9 | 能力门禁分级 | getSystemMaterialTypes + levelForCapability + disableAnimations | 无(§9 plat capability 计划中) | ❌ 属 §9 `plat_visual_tokens` 范畴 |
 
-**鑷粯楠ㄦ灦(1/3/4/5)鎬讳唬鐮侀噺棰勪及 鈮?300鈥?00 琛?*(painter + 缁勮),浜や簰(6/7)鍙﹂渶 200鈥?00 琛?+ 鐪熸満鑱旇皟銆?
+**自绘骨架(1/3/4/5)总代码量预估 ≈ 300–500 行**(painter + 组装),交互(6/7)另需 200–300 行 + 真机联调。
+
 ---
 
-## 5. 鍏抽敭鍐茬獊涓庨闄?
-1. **蟽 涓婇檺鍐茬獊**:HDS `exquisite` 蟽34 > U-03 `maxBlurSigma` 20銆偮? 闇€瑁佸喅:OH 鏀寔璁惧鏀惧(36)杩樻槸鎸?U-03 闄嶇骇鍒?gentle(蟽22 浜﹁秴 20,20 浠ュ唴 鈮?浠嬩簬 smooth/gentle)銆?2. **鍚堟垚绠＄嚎宸紓**(鏃犳硶娑堥櫎):`BackdropFilter`/蹇収鍧囬潪 ArkUI 绯荤粺鏉愯川绠＄嚎,閲囨牱鑼冨洿銆佽竟缂樿鍓€佹潗璐ㄧ瓑绾ц涓轰笌鐪熷搧涓嶄竴鑷粹€斺€斿弬鑰冨寘鍘熺敓瀵规瘮椤电敤浜庝汉宸ユ牎鍑?椤圭洰鑻ュ仛,闇€瑕佷竴鍚嶅姣斿熀鍑?寤鸿浣庝紭鍏堢骇)銆?3. **鎬ц兘**:鍙傝€冨寘姣忓抚 3 娆℃ā绯婃棤缂撳瓨;椤圭洰鐢ㄩ妯＄硦缂撳瓨鍙帇鍥?1 娆?**鑻ュ仛鍏夋劅蹇呴』璧扮紦瀛樿矾寰?*,鍚﹀垯杩濊儗 C-27 鏃㈡湁缁撹銆?4. **闂ㄧ涓嶅彲璇诲彇**:Flutter 渚ф棤娉曟煡 `getSystemMaterialTypes()`,鍙兘瀹夸富娉ㄥ叆;璁惧(API 23 鐪熸満)鏄惁鏀寔 IMMERSIVE 闇€鍘熺敓渚ф帰娴?鍙鐢?W3/W4 鐨?Plat* 閫氶亾妯″紡)銆?5. **鏃犲崌绾у啿绐?*浣?*鏃犵郴缁熻仈鍔?*:绯荤粺璁剧疆"娌夋蹈鍏夋劅 寮?鍧囪　/寮?涓嶅彲鎰熺煡銆佷笉鍙仈鍔?鈥?浠呰瑙夎繎浼?涓庡皬绫?Miuix 娑叉€佺幓鐠冨畾浣嶄竴鑷?鍙岀鍧囧彲璺?Web 鎸?U-03 绂?銆?
+## 5. 关键冲突与风险
+
+1. **σ 上限冲突**:HDS `exquisite` σ34 > U-03 `maxBlurSigma` 20。⚠️ 需裁决:OH 支持设备放宽(36)还是按 U-03 降级到 `gentle`(σ22 亦超 20,20 以内 ≈ 介于 smooth/gentle)。
+2. **合成管线差异**(无法消除):`BackdropFilter`/快照均非 ArkUI 系统材质管线,采样范围、边缘裁剪、材质等级行为与真品不一致——参考包原生对比页用于人工校准(项目若做,需要一名对比基准;建议低优先级)。
+3. **性能**:参考包每帧 3 次模糊无缓存;项目用预模糊缓存可压到 1 次。**若做光感必须走缓存路径**,否则违背 C-27 既有结论。
+4. **门禁不可读取**:Flutter 侧无法查 `getSystemMaterialTypes()`,只能宿主注入;设备(API 23 真机)是否支持 IMMERSIVE 需原生侧探测(可复用 W3/W4 的 Plat* 通道模式)。
+5. **无升级冲突**但 **无系统联动**:系统设置"沉浸光感 关/均衡/开"不可感知、不可联动——仅视觉近似,与小米 Miuix 液态玻璃定位一致,双端均可跑,Web 端按 U-03 禁用。
+
 ---
 
-## 6. 寤鸿(鎸?搂9,涓嶅湪鏈疆钀藉湴)
+## 6. 建议(归 §9,不在本轮落地)
 
-- 搂9 UI tokens(`plat_visual_tokens`)涓柊澧?**鍏夋劅妗ｄ綅 token 缁?*:`{level, blurSigma, fillOpacity, glowOpacity, shadowOpacity, specularOpacity, scatterOpacity}` + 涓夎壊鍏夋睜,榛樿 `adaptive`(=gentle,disableAnimations鈫抯mooth),鑳藉姏娉ㄥ叆璧?plat capability(涓?HUKS/picker 鍚屼竴閫氶亾妯″紡)銆?- **澶嶇敤浼樺厛**:涓绘ā绯娾啋`BackdropBlur`(缂撳瓨);楂樺厜/鍏夊湀鈫抈DualPeakHighlight`(shader 宸插氨缁?;鏁ｅ皠鈫掕瘎浼版墿 `lens_refraction.frag`(midRefraction 寰斁澶?鎴栨柊澧炶交閲?scatter shader;鍏夋睜/杈圭紭鈫掓柊澧?`GlowMaterialPainter`(绾?Canvas,鏃?shader 渚濊禆,鍙厛涓?銆?- **浜や簰鍏堜笉鍋?*(鎸夊帇鍏夊湀/鎷栨嫿寮规€?:楂樻垚鏈€佺湡鏈哄熀鍑嗙己澶?棣栫増鍙仛闈欐€佹潗璐?1鈥?),浜や簰鍒椾负浜屾湡銆?- **鎬ц兘绾㈢嚎**:璁惧鏈煡鏀寔鏃跺己鍒?`smooth`(蟽8);`exquisite` 浠呯湡鏈洪獙璇佸悗鏀惧紑;浠讳綍妗ｄ綅閮戒笉寰楀啀鐢ㄦ瘡甯у璺?BackdropFilter銆?
+- §9 UI tokens(`plat_visual_tokens`)中新增**光感档位 token 组**:`{level, blurSigma, fillOpacity, glowOpacity, shadowOpacity, specularOpacity, scatterOpacity}` + 三色光池,默认 `adaptive`(=gentle,disableAnimations→smooth),能力注入走 plat capability(与 HUKS/picker 同一通道模式)。
+- **复用优先**:主模糊→`BackdropBlur`(缓存);高光/光圈→`DualPeakHighlight`(shader 已就绪);散射→评估扩 `lens_refraction.frag`(midRefraction 微放大)或新增轻量 scatter shader;光池/边缘→新增 `GlowMaterialPainter`(纯 Canvas,无 shader 依赖,可先上)。
+- **交互先不做**(按压光圈/拖拽弹性):高成本、真机基准缺失;首版只做静态材质(1–5),交互列为二期。
+- **性能红线**:设备未知支持时强制 `smooth`(σ8);`exquisite` 仅真机验证后放开;任何档位都不得再用每帧多次 BackdropFilter。
+
+---
+
+## 7. 复核补充(2026-09,重写时追加)
+
+1. **目标设备结论**:实际验收设备为 **OpenHarmony 6.1.1.120 / API 24 / arm64**(非华为 HarmonyOS)。HDS 系统材质(`systemMaterialEffect`、`getSystemMaterialTypes()`)在该设备上**不存在**,因此能力门禁必然解析为"不支持",自绘 `smooth`/`gentle` 档位是唯一可交付形态;`exquisite` 仅作后续在华为真机上验证后放开。
+2. **σ 上限裁决建议**:既然系统材质不可用、光感完全自绘,σ 上限不必对齐 HDS 的 34;建议**维持 U-03 的 20 上限**,用 `gentle`(σ 收敛到 20)作为 OH 端默认,避免为了"参数对齐"而牺牲切页/滚动的帧率。
+3. **文档编码事故记录**:本文件 2026-07 初版以 UTF-8 **带 BOM + GBK 双重编码**保存(PowerShell 写中文文件所致),2026-09 检测时正文已乱码、约 466 处字符在编码往返中永久丢失;本次按还原稿重写为 **UTF-8 无 BOM**。相关红线见 `D:\Projects\SYNC_RULES.md` 第 2 节。

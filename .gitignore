@@ -58,3 +58,8 @@ android/.gradle/
 # 本地测试构建与发布产物(不入库)
 _test_builds/
 _release/
+
+# ── 鸿蒙源码工作副本(独立仓库 WJKLL/Toki-HarmonyOS)────────────
+# 该目录内含自己的 .git,若被本仓库 add -A 会误存为 gitlink(历史上已发生过一次)
+# 鸿蒙源码只推 WJKLL/Toki-HarmonyOS,本仓库(Android/Web)不收录
+harmonyos_port/
