@@ -2,6 +2,17 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.50.2（2026-09-09）[Web]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **Web 底部备案信息（ICP 备案）**：`web/index.html` 页脚固定显示「粤ICP备2026128498号-1」并链接工信部备案管理系统 `beian.miit.gov.cn`，符合工信部「网站在首页底部标明备案号」的要求与常见做法（居中、11px 小字、可点击、深浅色自适应）。备案条 `pointer-events: none`（仅链接本身可点）不拦截 Flutter 手势；同时用 `flutter-view { height: calc(100vh - 20px) !important }` 给 Flutter 视口底部让出 20px，使悬浮底栏胶囊（贴底 12px + 安全区）与备案条**不重叠** | index.html | Web |
+| 说明 | 实测（Edge headless `--dump-dom`）：引擎会给 `flutter-view` 写**内联像素尺寸**（`position:absolute; inset:0; width:Npx; height:Mpx`），仅覆盖 `bottom` 会被内联 `height` 压掉 → 必须用 `!important` 覆盖 `height` 才生效（实测视口 704 → 684）。纯 Web 模板改动，Android / HarmonyOS 产物不受影响；如需追加公安备案号，在 `#beian` 内另起一个 `<a>` 指向 `beian.mps.gov.cn` 即可 | — | Web |
+
+### 涉及编号变更
+- 版本：`1.50.1+156` → `1.50.2+158`（Web 备案信息；HarmonyOS 镜像侧本次无改动，保持 `1.50.1+157`）。
+
 ## v1.50.1（2026-09-09）[Android] [Web] [HarmonyOS]
 
 ### 变更清单

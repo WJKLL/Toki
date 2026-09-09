@@ -32,6 +32,57 @@
 
   <title>Toki</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    v1.50.2：网站底部备案信息（ICP 备案）。
+    工信部要求经营性/非经营性网站在首页底部标明备案号并链接到备案系统，
+    与大部分网站做法一致：页脚居中、小字、可点击跳转 beian.miit.gov.cn。
+    如需追加公安备案号，在 #beian 内另起一个 <a> 指向 beian.mps.gov.cn 即可。
+  -->
+  <style>
+    #beian {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font: 11px/20px system-ui, -apple-system, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      color: #999;
+      background: transparent;
+      pointer-events: none; /* 不拦截 Flutter 手势 */
+      z-index: 2147483647;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #beian a {
+      color: inherit;
+      text-decoration: none;
+      pointer-events: auto; /* 仅链接本身可点 */
+    }
+
+    #beian a:hover {
+      text-decoration: underline;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #beian {
+        color: #8a8a8a;
+      }
+    }
+
+    /* 给 Flutter 视口底部让出备案条高度，避免压住悬浮底栏胶囊。
+       实测（Edge headless）：引擎会给 flutter-view 写内联像素尺寸
+       （position:absolute; inset:0; width:Npx; height:Mpx），只覆盖 bottom
+       会被内联 height 压掉 → 必须用 !important 覆盖 height。 */
+    flutter-view {
+      height: calc(100vh - 20px) !important;
+    }
+  </style>
 </head>
 <body>
   <!--
@@ -43,5 +94,10 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+
+  <!-- 网站底部备案信息（ICP 备案号；链接指向工信部备案管理系统） -->
+  <div id="beian">
+    <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">粤ICP备2026128498号-1</a>
+  </div>
 </body>
 </html>
