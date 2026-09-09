@@ -54,7 +54,7 @@ class LogExportService {
 
   String _buildContent(String appVersion, String? deviceInfo) {
     final StringBuffer sb = StringBuffer();
-    sb.writeln('══════════ Toki 运行日志 ══════════');
+    sb.writeln('══════════ 百工箱 运行日志 ══════════');
     sb.writeln('版本: $appVersion');
     if (deviceInfo != null) sb.writeln('设备: $deviceInfo');
     sb.writeln('导出时间: ${DateTime.now()}');

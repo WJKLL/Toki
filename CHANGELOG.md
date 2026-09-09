@@ -2,6 +2,18 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.50.3（2026-09-09）[Android] [Web] [HarmonyOS]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **应用更名「百工箱」（阿里云 App 备案）**：原「Toki」备案未通过，按项目定位（Miuix 风格生活/换算工具箱）改名「百工箱」—— 中文、简短、直白（各类工具的汇集），且含「工」呼应包名 `xiangjugong`。全端显示名 / 标题统一：Android `android:label`、鸿蒙 `AppScope` `app_name` + `EntryAbility_label`（base/zh_CN/en_US）、Web `<title>` + `manifest.json` `name/short_name`、`AppConstants.appName/appNameEn/tagline`、导出日志头。GitHub 仓库名 `WJKLL/Toki` 与相册目录 `Pictures/Toki` **保持**（存储地址/开源地址不动） | F-01 / 全端 | Android 11+ / Web / HarmonyOS |
+| 平台 | **鸿蒙 bundleName 正式化**：`com.example.poc_ohos`（模板占位，阿里云必拒）→ `com.xiangjugong.xiangjugong`（与 Android 一致）；`ohos/AppScope/app.json5` + `AppScope/resources/.../string.json`（harmonyos_port / poc_ohos 两处同步）。已装 HAP 需卸载重装 | 鸿蒙 | HarmonyOS |
+| 测试 | 首页大标题断言随改名更新（`home_layout_test` / `widget_test` 两处 `'Toki'` → `'百工箱'`）；**全量 138/138 通过**，`analyze lib test` 0 | — | — |
+
+### 涉及编号变更
+- 版本：`1.50.2+158` → `1.50.3+159`（更名 + 鸿蒙包名正式化；HarmonyOS 镜像侧 `1.50.1+157` → `1.50.3+160`）。
+
 ## v1.50.2（2026-09-09）[Web]
 
 ### 变更清单

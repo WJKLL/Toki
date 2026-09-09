@@ -84,7 +84,7 @@ void main() {
       lessThan(300),
       reason: '🔧 布局稳定性：冷启动首页必须顶格（header 之下，无大片空白）',
     );
-    expect(find.text('Toki'), findsWidgets, reason: 'C-23 大标题存在（v1.30.0 更名）');
+    expect(find.text('百工箱'), findsWidgets, reason: 'C-23 大标题存在（v1.51.0 备案更名）');
 
     // 🔧 修复（v1.3.2 / T14）：折叠标题栏不再渲染长副标题。
     expect(

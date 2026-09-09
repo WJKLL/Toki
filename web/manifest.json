@@ -1,11 +1,11 @@
 {
-    "name": "Toki",
-    "short_name": "Toki",
+    "name": "百工箱",
+    "short_name": "百工箱",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Toki（Converter Toolbox）· Miuix 风格换算工具箱",
+    "description": "百工箱 · Miuix 风格换算工具箱",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

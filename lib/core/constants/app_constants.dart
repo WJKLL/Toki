@@ -5,9 +5,11 @@ import 'dart:ui' show Color;
 
 abstract final class AppConstants {
   // v1.30.0:应用更名 Toki(新图标见 android res mipmap / web icons)。
-  static const String appName = 'Toki';
-  static const String appNameEn = 'Toki';
-  static const String tagline = 'Converter Toolbox · Miuix 风格换算工具箱';
+  // v1.51.0:备案改名「百工箱」(原名 Toki 备案未通过;中文名对应
+  //   包名 com.xiangjugong.xiangjugong,与「箱工」谐音呼应)。
+  static const String appName = '百工箱';
+  static const String appNameEn = '百工箱';
+  static const String tagline = '百工箱 · Miuix 风格换算工具箱';
 
   /// 应用版本（与 pubspec version 同步，S-04 平台信息服务读取）。
   /// v1.34.0:同步为当前发布版本(此前长期滞留 1.17.4,关于页/日志失真)。

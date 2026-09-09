@@ -51,8 +51,8 @@ void main() {
 
     // 首页存在（应用名 + 摘要卡 + 卡片网格；v1.26.0:断言锚点从已下线
     // 的旧首页入口('色彩调色板')更新为当前首页结构)。
-    // v1.30.0:应用更名 Toki。
-    expect(find.text('Toki'), findsWidgets);
+    // v1.51.0:应用更名百工箱（备案）。
+    expect(find.text('百工箱'), findsWidgets);
     expect(find.byType(C27HomeSummary), findsOneWidget);
     expect(find.byType(C34ResponsiveCardGrid), findsOneWidget);
 
