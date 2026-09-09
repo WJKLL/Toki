@@ -31,6 +31,7 @@ import '../providers/home_cards_provider.dart';
 import 'cards/card_class_countdown.dart';
 import 'cards/card_combo.dart';
 import 'cards/card_dashboard.dart';
+import 'cards/card_ledger.dart';
 import 'cards/card_shell.dart';
 import 'cards/card_steam_tool.dart';
 
@@ -679,6 +680,8 @@ class _C34ResponsiveCardGridState extends ConsumerState<C34ResponsiveCardGrid>
       ComboCardData d => C28ComboCard(data: d),
       DashboardCardData d => C29DashboardCard(data: d),
       ClassCountdownCardData d => C33ClassCountdownCard(data: d),
+      LedgerRemainingCardData d => C51LedgerRemainingCard(data: d),
+      LedgerExpenseCardData d => C52LedgerExpenseCard(data: d),
       ToolLaunchCardData d => C37SteamToolCard(data: d),
     };
   }

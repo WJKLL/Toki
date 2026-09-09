@@ -300,7 +300,17 @@ class _GlowMaterialPainter extends CustomPainter {
     if (specA <= 0.01) {
       return;
     }
-    const double inset = 12;
+    // v1.50.4：原实现按固定 inset(12) + radius 内缩取端点 —— 在 FAB 这类
+    //   窄容器(56px / radius 18)上起点(30) > 终点(26)，线长变负 → 退化成
+    //   一个白色小点。改为按宽度比例取 18%~82%（与 GlowIndicatorPainter
+    //   同写法）：宽卡片观感基本不变，窄容器自然缩短且永不反向。
+    final double cx = size.width / 2;
+    final double halfSpan = size.width * 0.32;
+    final double x1 = cx - halfSpan;
+    final double x2 = cx + halfSpan;
+    if (x2 - x1 < 4) {
+      return;
+    }
     final Paint topLine = Paint()
       ..strokeWidth = 1.2
       ..strokeCap = StrokeCap.round
@@ -311,11 +321,7 @@ class _GlowMaterialPainter extends CustomPainter {
           const Color(0x00FFFFFF),
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, 1));
-    canvas.drawLine(
-      Offset(radius + inset, 0.9),
-      Offset(size.width - radius - inset, 0.9),
-      topLine,
-    );
+    canvas.drawLine(Offset(x1, 0.9), Offset(x2, 0.9), topLine);
   }
 
   // ── 4) 按压光圈(P2-2)──────────────────────────────────────

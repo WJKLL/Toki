@@ -37,8 +37,9 @@ import '../../core/logging/app_log_service.dart';
 const Set<String> _knownPaths = <String>{
   '/', // R-01 主框架（PageView shell）
   '/home', // R-02（→ /?page=1，一级页：首页）
-  '/tools', // R-03（→ /?page=2，一级页：工具集）
+  '/tools', // R-03（→ /?page=3，一级页：工具集；v1.50.0 起 index 3）
   '/todo', // R-13（v1.43.0 → /?page=0，一级页：待办，首页左边）
+  '/ledger', // R-16（v1.50.0 → /?page=2，一级页：记账，首页右边）
   '/todo/archived', // R-15（v1.43.0 P-12 回收站，顶层二级页）
   '/settings', // R-04（顶层二级页：设置）
   '/about', // R-05（顶层二级页：关于）
@@ -76,14 +77,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final String path = state.uri.path;
       // v1.10.3（S-13 覆盖增强）：路由跳转日志（开关关闭时零成本）。
       AppLogService.instance.info('router', '路由: ${state.uri}');
-      // T64：/home /tools /todo 映射到 shell 的 PageView 页索引。
+      // T64：/home /tools /todo /ledger 映射到 shell 的 PageView 页索引。
       // v1.43.0(P-10)：待办=page0、首页=page1、工具=page2。裸「/」保持默认
       //   首页(page=1)；已带 page 参数(如 /?page=0)不重定向(幂等)。
+      // v1.50.0(P-20)：记账=page2、工具顺延 page3。
       final String? page = state.uri.queryParameters['page'];
       if (path == '/' && page == null) return '/?page=1';
       if (path == '/todo') return '/?page=0';
       if (path == '/home') return '/?page=1';
-      if (path == '/tools') return '/?page=2';
+      if (path == '/ledger') return '/?page=2';
+      if (path == '/tools') return '/?page=3';
       // v1.44.0：/todo/:taskId(P-11 编辑器) 动态路径前缀放行(R-14)。
       if (path.startsWith('/todo/')) return null;
       // v1.13.0：/settings /about 为顶层二级页（菜单进入），不 redirect。

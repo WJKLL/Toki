@@ -10,11 +10,15 @@ import '../widgets/c26_more_menu.dart';
 /// 底栏项（C-22 动态项数数据源：与 PageView 页数同源派生）。
 /// v1.43.0(P-10)：待办一级页加在首页左边（index 0；默认启动仍落首页 page=1，
 ///   见 app_router initialLocation）。
+/// v1.50.0(P-20)：记账一级页加在首页右边（index 2；工具顺延至 index 3）。
 final bottomBarItemsProvider = Provider<List<C22BarItemData>>(
   (ref) => const [
     C22BarItemData('tasks', '待办'),
     C22BarItemData('home', '首页'),
-    C22BarItemData('tools', '工具'),
+    C22BarItemData('bankCards', '记账'),
+    // v1.50.0：原 'tools' 不在 flutter_miuix 图标集内（静默回退箭头），
+    //   改用 gridView（工具集以网格呈现）。
+    C22BarItemData('gridView', '工具'),
   ],
 );
 

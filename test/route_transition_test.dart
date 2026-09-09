@@ -10,12 +10,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/ledger_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/features/settings/page_p01_02_settings_page.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
+import 'package:xiangjugong/presentation/providers/ledger_providers.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
 import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 import 'package:xiangjugong/presentation/widgets/c26_more_menu.dart';
@@ -42,6 +44,8 @@ Future<SettingsRepositoryImpl> _pumpApp(
         ),
         // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
         todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
+        // v1.50.0(S-25)：记账仓储注入（首页记账卡 / P-20 记账页）。
+        ledgerRepositoryProvider.overrideWithValue(LedgerRepositoryImpl(prefs)),
       ],
       child: const XiangJuGongApp(),
     ),

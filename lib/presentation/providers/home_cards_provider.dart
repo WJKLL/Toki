@@ -32,6 +32,9 @@ const List<HomeCardData> kDefaultGridCards = <HomeCardData>[
     progress: <int>[],
   ),
   ClassCountdownCardData(),
+  // v1.50.2(P-20)：记账支出卡（四档支出）+ 记账剩余卡（本月剩余圆环）。
+  LedgerExpenseCardData(),
+  LedgerRemainingCardData(),
 ];
 
 // ── v1.34.0(P-08):首页工具目录状态(长按添加/移除,持久化)────────────

@@ -28,12 +28,14 @@ import 'core/widgets/glow_material.dart';
 import 'data/repositories/agreement_repository_impl.dart';
 import 'data/repositories/course_repository_impl.dart';
 import 'data/repositories/daily_activity_repository_impl.dart';
+import 'data/repositories/ledger_repository_impl.dart';
 import 'data/repositories/settings_repository_impl.dart';
 import 'data/repositories/todo_repository_impl.dart';
 import 'domain/entities/app_settings.dart';
 import 'presentation/providers/agreement_provider.dart';
 import 'presentation/providers/course_provider.dart';
 import 'presentation/providers/daily_activity_provider.dart';
+import 'presentation/providers/ledger_providers.dart';
 import 'presentation/providers/scroll_activity_provider.dart';
 import 'presentation/providers/settings_providers.dart';
 import 'presentation/providers/todo_providers.dart';
@@ -57,6 +59,8 @@ Future<void> main() async {
   );
   // v1.43.0（S-23）：待办/回收站仓储（与设置共用 prefs 实例）。
   final TodoRepositoryImpl todoRepository = TodoRepositoryImpl(prefs);
+  // v1.50.0（S-25）：记账仓储（与设置共用 prefs 实例）。
+  final LedgerRepositoryImpl ledgerRepository = LedgerRepositoryImpl(prefs);
 
   // 🐛 修复（BUG-001 / T12）：UI 首帧前一次性探测真实 Android API Level
   //   （澎湃OS 4 / Android 17 误识别为 12 的修正），结果缓存于 U-04；
@@ -118,6 +122,8 @@ Future<void> main() async {
           agreementRepositoryProvider.overrideWithValue(agreementRepository),
           // v1.43.0（S-23）：待办/回收站仓储注入。
           todoRepositoryProvider.overrideWithValue(todoRepository),
+          // v1.50.0（S-25）：记账仓储注入。
+          ledgerRepositoryProvider.overrideWithValue(ledgerRepository),
         ],
         child: const XiangJuGongApp(),
       ),

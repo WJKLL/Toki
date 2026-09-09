@@ -7,8 +7,6 @@
 // 阶段2：右上回收站入口(/todo/archived P-12)；UI：左上无占位按钮、
 //   FAB 毛玻璃与首页 C-24 统一、回收站入口裸图标。
 // 阶段6（v1.44.0）：横屏分栏列表+流程图只读预览、卡片点按进流程图编辑器。
-import 'dart:ui' as ui;
-
 import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart' show Material, MaterialType;
 import 'package:flutter/widgets.dart';
@@ -17,14 +15,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/lifecycle/app_lifecycle_controller.dart';
-import '../../../core/utils/u03_blur_policy.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../../core/widgets/mini_toast.dart';
 import '../../../domain/entities/todo_item.dart';
-import '../../providers/platform_providers.dart';
 import '../../providers/settings_providers.dart';
 import '../../providers/todo_providers.dart';
 import '../../widgets/c22_content_through_floating_bottom_bar.dart';
+import '../../widgets/c24_frosted_fab.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
 import '../../widgets/c43_date_navigation.dart';
@@ -115,61 +112,19 @@ class _PageP10TodoPageState extends ConsumerState<PageP10TodoPage>
     );
   }
 
-  /// 新建 FAB（右下 Positioned；毛玻璃视觉对齐首页 C-24：Android 13+ 模糊
-  /// tint 0.20，其余降级 0.88 表面色；56×56 squircle + 单层阴影）。
-  Widget _buildFab(
-    BuildContext context,
-    MiuixColors colors,
-    double throughInset,
-  ) {
-    final PlatformInfo platform = ref.watch(platformInfoProvider);
-    final bool blurAllowed = U03BlurPolicy.allowBlur(
-      userEnabled: true,
-      isWeb: platform.isWeb,
-      androidSdkInt: platform.androidSdkInt,
-    );
-    const ShapeBorder shape = MiuixSquircleBorder(cornerRadius: 18);
-    Widget inner = Container(
-      width: 56,
-      height: 56,
-      decoration: ShapeDecoration(
-        color: colors.surfaceContainerHigh.withValues(
-          alpha: blurAllowed ? 0.20 : 0.88,
-        ),
-        shape: shape,
-        shadows: const <BoxShadow>[
-          BoxShadow(
-            color: Color(0x26000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Center(
+  /// 新建 FAB（v1.50.3：统一改用 C-24 毛玻璃 FAB —— 深色提亮 + GLOW 光感，
+  /// 位置避让与几何常量同源；原自绘版本删除，避免两处视觉漂移）。
+  Widget _buildFab() {
+    return Positioned.fill(
+      child: C24FrostedFab(
+        // v1.50.3：key 挂内部可点区域（组件为撑满型，挂外层会点到屏幕中央）。
+        buttonKey: const ValueKey('todo.fab'),
+        onPressed: _openAdd,
         child: MiuixIcon(
           vector: appIcon('add'),
           size: 24,
-          tint: colors.onSurface,
+          tint: MiuixTheme.of(context).colors.onSurface,
         ),
-      ),
-    );
-    if (blurAllowed) {
-      inner = ClipPath(
-        clipper: const ShapeBorderClipper(shape: shape),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: inner,
-        ),
-      );
-    }
-    return Positioned(
-      right: 20,
-      bottom: 20 + throughInset,
-      child: GestureDetector(
-        key: const ValueKey('todo.fab'),
-        behavior: HitTestBehavior.opaque,
-        onTap: _openAdd,
-        child: inner,
       ),
     );
   }
@@ -331,8 +286,8 @@ class _PageP10TodoPageState extends ConsumerState<PageP10TodoPage>
               _buildEditSheet(colors),
               _buildMenuDialog(colors),
               _buildDeleteDialog(colors),
-              // 新建 FAB：与首页 C-24 同款毛玻璃视觉（Positioned 定位可控）。
-              _buildFab(context, colors, throughInset),
+              // 新建 FAB：v1.50.3 统一 C-24 毛玻璃 FAB（深色提亮 + 光感）。
+              _buildFab(),
             ],
           ),
         );

@@ -15,6 +15,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:xiangjugong/data/repositories/agreement_repository_impl.dart';
+import 'package:xiangjugong/data/repositories/ledger_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/settings_repository_impl.dart';
 import 'package:xiangjugong/data/repositories/todo_repository_impl.dart';
 import 'package:xiangjugong/domain/entities/app_settings.dart';
@@ -22,6 +23,7 @@ import 'package:xiangjugong/domain/repositories/agreement_repository.dart';
 import 'package:xiangjugong/main.dart';
 import 'package:xiangjugong/presentation/features/settings/page_p01_02_settings_page.dart';
 import 'package:xiangjugong/presentation/providers/agreement_provider.dart';
+import 'package:xiangjugong/presentation/providers/ledger_providers.dart';
 import 'package:xiangjugong/presentation/providers/settings_providers.dart';
 import 'package:xiangjugong/presentation/providers/todo_providers.dart';
 
@@ -49,6 +51,8 @@ void main() {
           ),
           // v1.43.0(S-23)：待办仓储注入（P-10 为 PageView 首页左页）。
           todoRepositoryProvider.overrideWithValue(TodoRepositoryImpl(prefs)),
+          // v1.50.0(S-25)：记账仓储注入（首页记账卡 / P-20 记账页）。
+          ledgerRepositoryProvider.overrideWithValue(LedgerRepositoryImpl(prefs)),
         ],
         child: const XiangJuGongApp(),
       ),
@@ -127,7 +131,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    final MiuixTabRow tabRow = tester.widget<MiuixTabRow>(uiModeRow);
+    // v1.50.0：设置页分段已换 GlowTabRow（GLOW-04 选中项光感包装），
+    //   key 落在包装层 → 需向下取内部 MiuixTabRow 读 selectedTabIndex。
+    final MiuixTabRow tabRow = tester.widget<MiuixTabRow>(
+      find.descendant(of: uiModeRow, matching: find.byType(MiuixTabRow)),
+    );
     expect(
       tabRow.selectedTabIndex,
       1,

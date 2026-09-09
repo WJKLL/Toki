@@ -36,6 +36,7 @@ import '../../core/widgets/glow_material.dart';
 import '../../core/widgets/glow_tokens.dart';
 import '../../domain/entities/app_settings.dart';
 import '../features/home/page_p01_01_home_page.dart';
+import '../features/ledger/page_p20_ledger_page.dart';
 import '../features/todo/page_p10_todo_page.dart';
 import '../features/tools/page_p01_04_tools_page.dart';
 import '../providers/blur_degrade_provider.dart';
@@ -109,7 +110,7 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
   bool _programmaticPageChange = false;
 
   /// 底栏项数缓存(路由回调防 ref-after-deactivate;build 时同步)。
-  int _itemsLen = 3;
+  int _itemsLen = 4;
 
   // ── T50（P1 采样卡死修复）：页面级毛玻璃快照 ──
   /// 仅悬浮模式 + 毛玻璃开关（v1.10.21）+ Android 13+（U-03）创建；
@@ -439,6 +440,7 @@ class _MainShellPageState extends ConsumerState<MainShellPage>
         children: const <Widget>[
           RepaintBoundary(child: PageP10TodoPage()),
           RepaintBoundary(child: PageP0101HomePage()),
+          RepaintBoundary(child: PageP20LedgerPage()),
           RepaintBoundary(child: PageP0104ToolsPage()),
         ],
       ),

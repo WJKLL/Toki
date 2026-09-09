@@ -2,13 +2,25 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
-## v1.50.0-dev（2026-09-08 开发快照）[Android] [Web] [HarmonyOS]
+## v1.50.0（2026-09-09）[Android] [Web] [HarmonyOS]
 
-> 本条目为「鸿蒙本地化适配」开发快照（工作区状态,未发布）；HarmonyOS 移植版同仓于 `harmonyos_port/`,详见其 README 与 `NATIVE_FEATURES.md`。
+> 本条目含「鸿蒙本地化适配」与「记账一级页」两部分；HarmonyOS 移植版同仓于 `harmonyos_port/`,详见其 README 与 `NATIVE_FEATURES.md`。
 
 ### 变更清单
 | 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
 | :--- | :--- | :--- | :--- |
+| 功能 | **记账一级页（P-20）**：底栏新增第 3 项「记账」（待办 / 首页 / 记账 / 工具），单月视图 = C-49 月份导航 + 汇总卡（支出 / 收入 / 结余）+ 按日分组流水列表；右下 C-24 毛玻璃 FAB「记一笔」→ 底部 sheet（支出/收入 → 金额 → 分类 → 备注 → 日期）；长按流水卡 = 编辑 / 删除 | P-20 / C-46 / C-47 / C-49 | Android 11+ / Web / HarmonyOS |
+| 数据 | **记账领域层（S-25）**：金额一律「分」为单位 `int`（避免 double 累加误差）；`LedgerEntry`（支出/收入/转账，转账不计收支统计）+ `LedgerCategory`（一级/二级，内置预设 = 12 支出 + 购物下 13 二级 + 5 收入）；存储沿用 prefs + JSON（`ledger.entries` / `ledger.categories`，与 S-23 待办同模式）；月度统计 `computeMonthStats` 与按日分组 `groupEntriesByDay` 为纯函数（二级分类归并到一级统计） | S-25 / ledger_providers | 同上 |
+| UI | **C-45 记账图标集（自绘矢量）**：flutter_miuix 内置图标（basic 7 个 + extended 124 个）不含钱包/餐饮/交通/医疗等记账语义，按 miuix 面性图标语言自绘 30 个 24×24 图标（`MiuixVectorIcon` + 纯几何填充路径，与内置图标同管线 tint/FittedBox 缩放，静止零重绘） | C-45 | 同上 |
+| 修复 | **底栏「工具」图标静默回退箭头**：`appIcon('tools')` 不在图标集内 → 回退 `basic.arrowRight`（不报错但图标错），改用 `gridView` | C-22 / F-01 | Android 11+ / Web / HarmonyOS |
+| 导航 | **一级页 3 → 4**：`bottomBarItemsProvider` 追加记账项（底栏与宽屏侧栏同源 → 侧栏零改动自动跟随）；PageView 加页 + `_itemsLen` 3 → 4；路由 `/ledger → /?page=2`（R-16）、`/tools → /?page=3` | P-01 / S-03 / C-22 | 同上 |
+| 功能 | **月度预算**：prefs `ledger.budgetCents` + 记账页顶栏「预算」入口（输入 / 留空清除）；首页卡片口径依赖它 | S-25 / P-20 | Android 11+ / Web / HarmonyOS |
+| 功能 | **首页记账卡（拆为两张，2×1 + 1×1）**：C-51 剩余卡（本月剩余圆环，环色默认**金黄** `#F5A623`、Monet 开启时跟随取色主色，超支转 error；口径 = **预算 + 本月收入 − 本月支出**）+ C-52 支出卡（顶部四档粗体标签「本日 / 本周 / 本月 / 本年」横向排列，下方分别对应细体金额，同时展示）；两卡点击均进记账一级页 | C-51 / C-52 / C-34 | 同上 |
+| 修复 | **分段按钮（GlowTabRow）背后的大方块**：`MiuixTabRow` 默认整条 `SizedBox(width: double.infinity)` + `ColoredBox(colors.surface)` —— 一条撑满宽度、直角的 surface 底色带，在底部 sheet（底色 `colors.background`）里呈显眼方块；改为透明底（仅保留选中项指示块），并修正光感指示器几何（原按 `maxWidth / 项数` 定位、未扣除 `itemSpacing` 9 → 项数越多偏移越大） | GLOW-04 / C-47 | 同上 |
+| 修复 | **横屏 + 键盘弹出时 sheet 底部空白**：鸿蒙横屏键盘弹起时 Flutter 视图**整体缩小**（overlay 高 = 屏幕高 − 键盘高，viewInsets 归零），卡片按自然高度贴底即落在键盘上沿；但 `MiuixOverlayBottomSheet` 会把 `MediaQuery.viewInsets` 加进**卡片背景内部**，该值非 0 时卡片底边向下延伸出空白带 —— 横屏时把 viewInsets 归零（视图已缩小时为幂等 no-op），内容区保持自然高度 | P-20 | 同上 |
+| UI | **深色 FAB 可见性 + 光感**：C-24 毛玻璃 FAB 深色下背景不透明度 0.20 → **0.55**（降级态 0.88 → 0.94），并叠 GLOW-02 光感材质（边缘层次 + 顶部高光线 + 按压光圈，档位跟随全局 GlowScope）；待办页自绘 FAB 删除、统一改用 C-24（位置避让与几何常量同源，消除两处视觉漂移）；新增 `buttonKey`（本组件为撑满型 Align，key 挂外层会点到屏幕中央） | C-24 / P-10 / P-20 | 同上 |
+| 修复 | **GLOW-02 顶高光线在窄容器上退化成白点**：`_paintTopLine` 按固定 `inset(12) + radius` 取端点，FAB（56px / radius 18）上起点 30 > 终点 26 → 线长变负、渲染成一个白点；改为按宽度比例取 18%~82%（与 `GlowIndicatorPainter` 同写法），宽卡片观感不变、窄容器自然缩短且永不反向 | GLOW-02 / C-24 | 同上 |
+| 测试 | C-45 图标几何自检（30 个包围盒全部落在 24×24 视口内）+ golden 预览图；**全量 135/135 通过**（新增记账仓储注入需覆盖 7 个测试文件的 ProviderScope；C-24 的 key 改挂内部可点区域；设置页分段断言改取 GlowTabRow 内部的 MiuixTabRow）；主工程 `analyze` 0，镜像工程仅存量 info | — | — |
 | 修复 | **问候语节气温差窗**：仅当日命中节气才显示「今日X」（次日回落为时段问候，不再 9/8 显示「今日白露」） | S-22 / C-27 | Android 11+ / Web / HarmonyOS |
 | 功能 | **课表「第一周起始日」+ 自动周次**：设置起始日（如 2026-09-01）后当前周次随日期自动推算（每 7 天 +1,跨年自然滚动）；badge 显示「（自动）」；单双周/指定周过滤、提醒、卡片同步全链路走 `effectiveWeek` | S-15 / P-06 | 同上 |
 | 修复 | **课表页边距与自适应列宽**：学期信息/节次时间表/课表网格统一 16px 左右边距；横屏按可用宽度自适应列宽（不再贴边/左靠右空） | P-06 | 同上 |
@@ -17,7 +29,7 @@
 | 测试 | greeting 节气次日回落用例 + `effectiveWeek` 6 边界用例（起始日/跨周/跨年/非法/JSON 往返）；15/15 通过,analyze 0 | — | — |
 
 ### 涉及编号变更
-- 版本：`1.49.1+153` → `1.50.0-dev`（仅快照,未发布;Mirror/镜像侧功能见 harmonyos_port）。
+- 版本：`1.49.2+154` → `1.50.0+155`（记账一级页 P-20 + 鸿蒙本地化适配；HarmonyOS 镜像侧同版本 `1.50.0+156`，详见 harmonyos_port）。
 
 ## v1.49.1（2026-09-08）[Android] [Web]
 

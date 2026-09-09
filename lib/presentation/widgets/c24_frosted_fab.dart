@@ -18,6 +18,7 @@ import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/u03_blur_policy.dart';
+import '../../core/widgets/glow_material.dart';
 import '../providers/platform_providers.dart';
 import '../providers/settings_providers.dart';
 import 'c22_content_through_floating_bottom_bar.dart';
@@ -28,6 +29,7 @@ class C24FrostedFab extends ConsumerWidget {
     super.key,
     required this.onPressed,
     required this.child,
+    this.buttonKey,
     this.size = 56,
     this.elevation = 4,
   });
@@ -37,6 +39,12 @@ class C24FrostedFab extends ConsumerWidget {
 
   /// 图标或文字内容。
   final Widget child;
+
+  /// 可点区域（内部 GestureDetector）的定位 key —— 测试/自动化用。
+  /// 本组件是**撑满型**：自身返回 Align(bottomRight) + AnimatedPadding 自行定位，
+  /// 调用方需用 Positioned.fill 包裹 → 若把 key 挂在组件本身，`tap` 取到的中心
+  /// 会落在父级中央而不是 56×56 的按钮上。要按 key 点击请传本参数。
+  final Key? buttonKey;
 
   /// 按钮边长（默认 56，Material 系 FAB 标准）。
   final double size;
@@ -49,6 +57,10 @@ class C24FrostedFab extends ConsumerWidget {
   static const double _blurSigma = 10; // sigma ≤ 20（§11.7.3；demo 低模糊 12→10）
   static const double _blurredBgAlpha = 0.20; // 毛玻璃态半透明 tint
   static const double _fallbackBgAlpha = 0.88; // 降级态表面色不透明度
+  // v1.50.3（深色 FAB 可见性）：深色下 surfaceContainerHigh 本身极暗，
+  //   0.20 不透明度等于没有背景，FAB 与页面糊成一片 → 深色单独提亮分档。
+  static const double _blurredBgAlphaDark = 0.55; // 深色毛玻璃态
+  static const double _fallbackBgAlphaDark = 0.94; // 深色降级态
 
   /// 右下角右间距（固定）。
   static const double kRightInset = 24;
@@ -79,11 +91,16 @@ class C24FrostedFab extends ConsumerWidget {
       androidSdkInt: platform.androidSdkInt,
     );
     final MiuixColors colors = MiuixTheme.of(context).colors;
+    // 深色判定与 CardShadow / GlowMaterial 同源（Miuix 实际取色 luminance）。
+    final bool dark = colors.surface.computeLuminance() < 0.5;
     const ShapeBorder shape = MiuixSquircleBorder(cornerRadius: _cornerRadius);
 
     // 背景色：毛玻璃态低不透明度 tint；降级态高不透明度表面色（可读性）。
+    // v1.50.3：深色分档提亮（否则 FAB 在深色底上"没有背景"）。
     final Color background = colors.surfaceContainerHigh.withValues(
-      alpha: blurAllowed ? _blurredBgAlpha : _fallbackBgAlpha,
+      alpha: blurAllowed
+          ? (dark ? _blurredBgAlphaDark : _blurredBgAlpha)
+          : (dark ? _fallbackBgAlphaDark : _fallbackBgAlpha),
     );
 
     Widget button = Container(
@@ -116,16 +133,27 @@ class C24FrostedFab extends ConsumerWidget {
     }
 
     // ⚡ 功耗优化：RepaintBoundary 隔离 —— 父组件重绘不触发 FAB 重绘（§11.2.3）。
-    final Widget buttonWidget = RepaintBoundary(
+    Widget buttonWidget = RepaintBoundary(
       child: Semantics(
         button: true,
         child: GestureDetector(
+          key: buttonKey,
           behavior: HitTestBehavior.opaque,
           onTap: onPressed,
           child: button,
         ),
       ),
     );
+    // v1.50.3：深色叠 GLOW-02 光感材质（边缘层次 + 顶部高光线 + 按压光圈），
+    //   让 FAB 在深色底上呈现"被照亮"的立体感；浅色透传（零绘制）。
+    //   档位跟随全局 GlowScope（用户设「关」→ GlowMaterial 内部直接透传）。
+    if (dark) {
+      buttonWidget = GlowMaterial(
+        radius: _cornerRadius,
+        interactive: true,
+        child: buttonWidget,
+      );
+    }
 
     // 🔧 修复（v1.5.1 / T30）：右下角悬浮，底部间距随 C-22 悬浮底栏动态避让；
     //   AnimatedPadding(200ms) 使开关切换时位置平滑过渡（§11.5 一次性 ≤600ms）。

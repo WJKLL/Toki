@@ -40,6 +40,12 @@ enum HomeCardType {
 
   /// v1.34.0（P-08）：工具启动卡（C-37,按目录动态追加尾部,右上 ✕ 可移除）。
   tool,
+
+  /// v1.50.2（P-20）：记账剩余卡（C-51）—— 本月剩余圆环。
+  ledgerRemaining,
+
+  /// v1.50.2（P-20）：记账支出卡（C-52）—— 本日/本周/本月/本年支出。
+  ledgerExpense,
 }
 
 /// 首页卡片数据基类（sealed：穷尽匹配，避免非法类型）。
@@ -155,4 +161,29 @@ class ToolLaunchCardData extends HomeCardData {
       );
 
   final String toolId;
+}
+
+/// v1.50.2（P-20）：C-51 记账剩余卡（1×1）—— 数据全部由组件内部
+/// watch ledgerHomeCardProvider 派生，本类型仅作分发。
+class LedgerRemainingCardData extends HomeCardData {
+  const LedgerRemainingCardData()
+    : super(
+        type: HomeCardType.ledgerRemaining,
+        id: 'ledgerRemaining',
+        size: CardSize.small,
+      );
+}
+
+/// v1.50.2（P-20）：C-52 记账支出卡（2×1）—— 顶部四档粗体标签
+/// （本日/本周/本月/本年）+ 下方对应细体金额，数据同由组件内部派生。
+class LedgerExpenseCardData extends HomeCardData {
+  const LedgerExpenseCardData({this.title = '支出'})
+    : super(
+        type: HomeCardType.ledgerExpense,
+        id: 'ledgerExpense',
+        size: CardSize.wide,
+      );
+
+  /// 卡片标题。
+  final String title;
 }
