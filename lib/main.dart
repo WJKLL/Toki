@@ -191,8 +191,12 @@ class XiangJuGongApp extends ConsumerWidget {
               if (n is ScrollStartNotification ||
                   n is ScrollUpdateNotification) {
                 c.notifyActivity(true);
+                // v1.50.1（GLOW-04）：滚动中禁卡片按压光圈 —— 「按下即滑动」
+                //   不应触发 180ms 整卡重绘（首页纵向滚动起始掉帧主因之一）。
+                GlowPressGate.scrollActive.value = true;
               } else if (n is ScrollEndNotification) {
                 c.notifyActivity(false);
+                GlowPressGate.scrollActive.value = false;
               }
               return false; // 不拦截，继续冒泡给上层（main_shell S-16 等）。
             },

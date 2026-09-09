@@ -2,6 +2,17 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.50.1（2026-09-09）[Android] [Web] [HarmonyOS]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 性能 | **滚动期禁卡片按压光圈（GLOW-04）**：`GlowMaterial` 的 `Listener.onPointerDown` 不参与手势竞技场 —— 手指按在卡片上**直接开始滑动**时，按下瞬间卡片仍会跑 180ms 按压光圈动画（每帧 `setState` 重绘整卡，含 `CardShadow` 双层阴影模糊），松手再 260ms 反向回收；首页纵向滚动起始因此必然掉帧，而滚动场景本不该有按压反馈。新增全局门控 `GlowPressGate.scrollActive`（`main.dart` 根部 `ScrollNotification` 写入，覆盖全部路由含二级页）：滚动中按下直接忽略；滚动开始即刻停掉进行中的光圈并把进度归零（零残留、零后续重绘）。非滚动路径（点击、长按）按压反馈完全不变 | GLOW-04 / GLOW-02 / CardShadow / main | Android 11+ / Web / HarmonyOS |
+| 测试 | GLOW-04 门控 3 用例（静止按下照常触发 / 滚动中按下不触发 / 滚动开始收掉进行中的光圈且此后不再逐帧重建）；**全量 138/138 通过**，`analyze lib test` 0 | — | — |
+
+### 涉及编号变更
+- 版本：`1.50.0+155` → `1.50.1+156`（首页纵向滚动掉帧 P0 修复；HarmonyOS 镜像侧同版本 `1.50.1+157`）。
+
 ## v1.50.0（2026-09-09）[Android] [Web] [HarmonyOS]
 
 > 本条目含「鸿蒙本地化适配」与「记账一级页」两部分；HarmonyOS 移植版同仓于 `harmonyos_port/`,详见其 README 与 `NATIVE_FEATURES.md`。

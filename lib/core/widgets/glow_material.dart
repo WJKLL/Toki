@@ -1,5 +1,6 @@
 // === 文件: lib/core/widgets/glow_material.dart ===
-// 编号:GLOW-02 光感材质层(2026-09-09 一期静态光感 / P2-2 按压光圈)
+// 编号:GLOW-02 光感材质层(2026-09-09 一期静态光感 / P2-2 按压光圈;
+//   v1.50.1 GLOW-04 滚动期按压门控)
 // 说明:在子内容**之上**叠加一层纯 Canvas 光感(彩色柔光 + 边缘层次 + 顶高光线),
 //   不改动子内容布局与命中测试;interactive=true 时额外响应按压(光圈从触点扩散)。
 //
@@ -16,7 +17,8 @@
 //   2. **静态零重绘** —— 无按压时 shouldRepaint 返回 false,不注册 Ticker;
 //   3. **按压期 Ticker 仅在按下到松手之间运行**(forward 180ms / reverse 260ms),
 //      松手后 controller 停止,回到静止零成本状态;
-//   4. 档位「关」→ 完全透传,零绘制。
+//   4. 档位「关」→ 完全透传,零绘制;
+//   5. **滚动期不响应按压**(GLOW-04,v1.50.1) —— 见 [GlowPressGate]。
 import 'dart:async' show unawaited;
 
 import 'package:flutter/widgets.dart';
@@ -37,6 +39,23 @@ class GlowScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(GlowScope oldWidget) => oldWidget.level != level;
+}
+
+/// GLOW-04(v1.50.1):滚动/翻页期按压门控。
+///
+/// 背景:`Listener.onPointerDown` 不参与手势竞技场 —— 手指按在卡片上**直接
+///   开始滑动**时,按下瞬间卡片仍会触发 180ms 按压光圈动画(每帧 setState
+///   重绘整卡,含 CardShadow 双层阴影模糊),松手再 260ms 反向。首页纵向
+///   滚动起始因此必然掉帧,而滚动场景本就不该有按压反馈。
+/// 用法:宿主(main.dart 根部 ScrollNotification 监听,覆盖全部路由)在滚动
+///   开始/结束时写 [scrollActive];[GlowMaterial] 读到 true 时忽略按压,
+///   并立即收掉进行中的光圈(零残留)。
+/// 性能:单个全局 ValueNotifier,仅滚动起止各通知一次(非每帧)。
+class GlowPressGate {
+  GlowPressGate._();
+
+  /// true = 正在滚动/翻页 → 按压光圈一律不响应。
+  static final ValueNotifier<bool> scrollActive = ValueNotifier<bool>(false);
 }
 
 /// 光感材质层(overlay)。
@@ -77,7 +96,27 @@ class _GlowMaterialState extends State<GlowMaterial>
   Offset? _point;
 
   @override
+  void initState() {
+    super.initState();
+    // GLOW-04:滚动开始即刻收掉进行中的光圈(零残留、零后续重绘)。
+    GlowPressGate.scrollActive.addListener(_onScrollGate);
+  }
+
+  /// 滚动门控变化:进入滚动 → 立即停掉光圈并把进度归零(仅一次重建)。
+  /// 退出滚动不做任何事(触点已在滚动开始时清空)。
+  void _onScrollGate() {
+    if (!mounted || !GlowPressGate.scrollActive.value) return;
+    if (_point == null && _progress == 0) return;
+    _press?.stop();
+    setState(() {
+      _point = null;
+      _progress = 0;
+    });
+  }
+
+  @override
   void dispose() {
+    GlowPressGate.scrollActive.removeListener(_onScrollGate);
     _press?.dispose();
     super.dispose();
   }
@@ -97,6 +136,8 @@ class _GlowMaterialState extends State<GlowMaterial>
   }
 
   void _onDown(PointerDownEvent event) {
+    // GLOW-04:滚动/翻页中不响应按压 —— 「按下即滑动」不应触发光圈。
+    if (GlowPressGate.scrollActive.value) return;
     _ensurePress();
     _point = event.localPosition;
     unawaited(_press!.forward());
@@ -104,6 +145,8 @@ class _GlowMaterialState extends State<GlowMaterial>
 
   /// 松手/取消:光圈反向回收,并清掉触点(避免任何残留)。
   void _release() {
+    // GLOW-04:已被滚动收掉(触点已空、进度已零)→ 无需 reverse。
+    if (_point == null && _progress == 0) return;
     _point = null;
     final AnimationController? c = _press;
     if (c != null) {
