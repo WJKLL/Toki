@@ -12,6 +12,13 @@
   **尺寸声明一律未动**（minWidth/minHeight/minResize*/targetCell* 仍是
   250x110dp / 4x2，见 widget_today_courses_info.xml）。
 
+  v1.51.2 利用实机多出的高度（4x2 实际渲染 176dp，内容原仅约 106dp）：
+    · 课程名 16sp → **22sp**（视觉比重贴近鸿蒙版的 20fp）；
+    · 各行改为 marginBottom 分配间距（8 / 4 / 6 / 5dp），
+      总内容约 141dp + padding 22dp，在 176dp 内上下各留约 17dp。
+    · 间距用 margin 而非固定行高：空字段 GONE 时其 margin 一并塌陷，
+      不会留下死空行；根 gravity=center_vertical 负责整块居中。
+
   兼容性红线（v1.36.0 桌面小组件失败的复盘结论，务必保持）：
     1. ViewGroup 嵌套 ≤ 2 层：根 LinearLayout + 两个行 LinearLayout；
     2. 无 Bitmap、无 Canvas、无自定义绘制元素，**不使用裸 <View>**；
@@ -41,6 +48,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
         android:baselineAligned="false"
         android:orientation="horizontal">
 
@@ -53,7 +61,7 @@
             android:maxLines="1"
             android:text="今日课程"
             android:textColor="#FF111111"
-            android:textSize="12.5sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             tools:text="今日课程" />
 
@@ -73,6 +81,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
         android:baselineAligned="false"
         android:orientation="horizontal">
 
@@ -84,7 +93,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:textColor="#FF3482FF"
-            android:textSize="11sp"
+            android:textSize="11.5sp"
             tools:text="当前课程" />
 
         <TextView
@@ -104,10 +113,11 @@
         android:id="@+id/widget_name"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="#FF111111"
-        android:textSize="16sp"
+        android:textSize="22sp"
         android:textStyle="bold"
         tools:text="高等数学" />
 
@@ -116,10 +126,11 @@
         android:id="@+id/widget_room"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="5dp"
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="#FF8A8A92"
-        android:textSize="11sp"
+        android:textSize="11.5sp"
         tools:text="教室:A-301" />
 
     <!-- ── 下一节行 ────────────────────────────────────────────── -->
@@ -130,6 +141,6 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="#FF8A8A92"
-        android:textSize="11sp"
+        android:textSize="11.5sp"
         tools:text="下一节课是:大学英语 09:50" />
 </LinearLayout>
