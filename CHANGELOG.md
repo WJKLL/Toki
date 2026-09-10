@@ -7,7 +7,7 @@
 ### 变更清单
 | 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
 | :--- | :--- | :--- | :--- |
-| UI | **焦点卡利用实机多余高度**：实机 4×2 实际渲染 176dp，而卡面内容原仅约 106dp（居中后上下各留约 35dp 空档）。课程名 16sp → **22sp**（视觉比重贴近鸿蒙版的 20fp）；其余各行改用 `layout_marginBottom` 分配间距（标题行 8dp / 标签行 4dp / 课程名 6dp / 教室行 5dp），内容约 141dp + padding 22dp，在 176dp 内上下各留约 17dp。间距用 margin 而非固定行高 —— 空字段 `GONE` 时其 margin 一并塌陷，不会留下死空行 | F-10 | Android 11+ |
+| UI | **焦点卡利用实机多余高度**：实机 4×2 实际渲染 176dp，而卡面内容原仅约 106dp（居中后上下各留约 35dp 空档）。课程名 16sp → **22sp**（视觉比重贴近鸿蒙版的 20fp）；其余各行改用 `layout_marginBottom` 分配间距（标题行 8dp / 标签行 4dp / 课程名 6dp / 教室行 5dp），各行合计约 119dp、加 padding 后总占用约 141dp，在实机 176dp 内上下各留约 17dp。间距用 margin 而非固定行高 —— 空字段 `GONE` 时其 margin 一并塌陷，不会留下死空行 | F-10 | Android 11+ |
 | UI | 字号梯度相应微调：标题 12.5 → 13sp、标签 / 教室 / 下一节 11 → 11.5sp（周次与剩余保持 11sp）。梯度变为 **13 / 11.5 / 22 / 11.5 / 11.5** sp | F-10 | Android 11+ |
 | 说明 | **尺寸声明继续保持原值**：`minWidth=250dp` / `minHeight=110dp` / `minResizeWidth` / `minResizeHeight` / `targetCellWidth=4` / `targetCellHeight=2` / `updatePeriodMillis=1800000` 全部未改（`widget_today_courses_info.xml` 无 diff）。**取舍说明**：内容按实机 176dp 排布，若把卡片缩到声明下限 110dp，底部「下一节行」会被裁切 —— 这是「不抬高 minHeight（避免网格错位）又要利用实机空间」的必然取舍 | F-10 | Android 11+ |
 
