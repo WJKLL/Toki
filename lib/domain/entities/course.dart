@@ -90,9 +90,11 @@ class Course {
     '周日',
   ][day.clamp(1, 7)];
 
-  /// 节次文本（「第 N 节」）。
+  /// 节次文本（「第 N 节」/ 跨节「第 N-M 节」）。
+  /// v1.51.0 修复：跨节分支原为 `第$start-$start节`（两处占位符都是 start），
+  ///   第 3 节起跨 2 节会显示「第3-3节」；末节应为 `start + len - 1`。
   static String periodLabel(int start, int len) =>
-      len <= 1 ? '第$start节' : '第$start-$start节';
+      len <= 1 ? '第$start节' : '第$start-${start + len - 1}节';
 
   /// 周次文本（每周 / 单周 / 双周）。
   static String weekLabel(WeekType week) => switch (week) {

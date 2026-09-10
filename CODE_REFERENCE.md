@@ -227,6 +227,10 @@ xiangjugong/
 | `lib/domain/entities/daily_quote.dart` | S-21 模型（v1.26.0；v1.27.0 +lang）：DailyQuote（content/from/api/style/lang/dateKey/fetchedAt）+ QuoteApi/QuoteStyle 枚举 | 改模型 |
 | `lib/presentation/providers/quote_provider.dart` | S-21/S-22 首页内容源（v1.26.0；v1.27.0 手动刷新；v1.28.0 自动换新；v1.31.0 跨天保守检查）：dailyQuoteProvider（新鲜=同日&&同源&&同风格&&<45min，否则拉新）+ `forceRefresh`（25s 冷却）+ `autoRefresh`（45min Timer）+ `refreshIfDayChanged` + 本地文案池 | 改一言逻辑 |
 | `lib/core/widgets/mini_toast.dart` | MiniToast 轻提示（v1.28.0，无编号）：MIUI 风格底部胶囊，Overlay 实现（MiuixScaffold 无 Material Scaffold，替代 SnackBar） | 出轻提示 |
+| `lib/core/widget/widget_snapshot.dart` | **S-26 快照构建（v1.51.0）**：`buildTodaySnapshot()` 纯函数（今日筛选含单双周/指定周、时刻换算、ongoing/past/upcoming 判定、按开始时刻排序）+ `WidgetSnapshot.encode()` 产出桌面卡 JSON 载荷 | 改桌面卡内容或口径 |
+| `lib/core/widget/widget_bridge_service.dart` | **S-26 数据桥（v1.51.0）**：MethodChannel「xiangjugong/widget」—— `writeTodayCourses`/`clear`/`getInitialRoute`（冷启动深链，一次性）/`requestPin`；`install()` 注册热启动 `openRoute` 回调 → `pendingRoute` | 改原生交互协议 |
+| `lib/presentation/widgets/widget_bridge.dart` | **S-26 常驻桥（v1.51.0）**：课表/周次/节次变更去抖 500ms → 写快照并刷桌面；监听 `pendingRoute` 执行 go_router 跳转；亮暗切换重写 | 改刷新触发时机 |
+| `lib/domain/entities/course_span.dart` | **S-15 内部件（v1.51.0 提取）**：`courseSpanOf()` —— 课程覆盖启用节次的整段起止分钟；原为 `course_reminder_bridge._spanOf` 私有实现，现由提醒与桌面卡（S-26）共用，避免口径漂移 | 改节次计时算法 |
 
 ---
 
@@ -270,7 +274,7 @@ xiangjugong/
 | 首页工具目录（添加/移除） | `providers/home_cards_provider.dart` | `homeToolItemsProvider.notifier` 的 `add`/`remove`（持久化 `settings.homeToolItems`） |
 | Steam 凭证 | `core/tools/steam_auth_service.dart` + `providers/steam_providers.dart` | 换存取实现/平台分支；密钥不回显、不入日志 |
 
-**存储 key 全表**：`settings.uiMode / settings.monetEnabled / settings.keyColor / settings.paletteStyle / settings.blurEnabled / settings.floatingBarEnabled / settings.pageScale / settings.logCaptureEnabled`（S-02，300ms 防抖合并）｜`settings.classPeriods`（S-02，节次时间表 16 项 JSON）｜`settings.cardOrder`（S-02，首页网格卡顺序**竖/横两套** JSON 对象，旧数组自动迁移）｜`settings.dailyQuoteCache`（S-21 当日缓存）｜`settings.quoteEnabled/quoteApi/quoteStyle/quoteLang`（S-21）｜`settings.homeToolItems`（S-02，v1.34.0 首页工具目录）｜`settings.courseReminderEnabled`（S-02，v1.36.0 课程提醒总开关）｜`course.list`、`course.meta`（S-15）｜`daily.activity`（S-05）｜`user_agreement_accepted`、`user_agreement_version`（S-20）。Steam 凭证走 flutter_secure_storage（非 SharedPreferences，见 steam_auth_service.dart）。
+**存储 key 全表**：`settings.uiMode / settings.monetEnabled / settings.keyColor / settings.paletteStyle / settings.blurEnabled / settings.floatingBarEnabled / settings.pageScale / settings.logCaptureEnabled`（S-02，300ms 防抖合并）｜`settings.classPeriods`（S-02，节次时间表 16 项 JSON）｜`settings.cardOrder`（S-02，首页网格卡顺序**竖/横两套** JSON 对象，旧数组自动迁移）｜`settings.dailyQuoteCache`（S-21 当日缓存）｜`settings.quoteEnabled/quoteApi/quoteStyle/quoteLang`（S-21）｜`settings.homeToolItems`（S-02，v1.34.0 首页工具目录）｜`settings.courseReminderEnabled`（S-02，v1.36.0 课程提醒总开关）｜`course.list`、`course.meta`（S-15）｜`daily.activity`（S-05）｜`user_agreement_accepted`、`user_agreement_version`（S-20）｜**`widget.todayCourses`（S-26，v1.51.0；单独文件 `widget_store`，不与 settings 混写）**。Steam 凭证走 flutter_secure_storage（非 SharedPreferences，见 steam_auth_service.dart）。
 
 ### 2.3 路由与导航
 

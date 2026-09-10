@@ -6,6 +6,7 @@ package com.xiangjugong.xiangjugong.reminder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.xiangjugong.xiangjugong.widget.WidgetRefresh
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -18,6 +19,8 @@ class ReminderReceiver : BroadcastReceiver() {
         ) {
             // 开机 / 应用更新 / 时间变更：从持久化清单重排（系统重启清空闹钟）。
             ReminderScheduler.restoreAlarms(context)
+            // v1.51.0（F-10）：顺带刷新桌面课程卡（设备重启/改时间后状态可能过期）。
+            WidgetRefresh.refreshTodayCourses(context)
             return
         }
         val title = intent.getStringExtra(ReminderScheduler.EXTRA_TITLE) ?: "课程提醒"
@@ -40,5 +43,10 @@ class ReminderReceiver : BroadcastReceiver() {
                 // 的降级链可能被拦）：静默 —— App 打开后常驻由桥按需重建。
             }
         }
+        // v1.51.0（F-10）：课程开始闹钟到点 → 顺带刷新桌面课程卡。
+        //   WidgetRender 会按当前墙钟重算各行状态，因此本节「上课中」与
+        //   上一节「已结束」在同一次刷新里同时生效（无需独立的结束闹钟；
+        //   当天最后一节课结束由 updatePeriodMillis 的 30 分钟兜底覆盖）。
+        WidgetRefresh.refreshTodayCourses(context)
     }
 }

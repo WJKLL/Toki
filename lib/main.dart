@@ -23,6 +23,7 @@ import 'core/logging/perf_monitor.dart';
 import 'core/refresh_rate/refresh_rate_controller.dart';
 import 'core/tools/tool_catalog_store.dart';
 import 'core/utils/u04_platform_utils.dart';
+import 'core/widget/widget_bridge_service.dart';
 import 'core/widgets/app_scroll_behavior.dart';
 import 'core/widgets/glow_material.dart';
 import 'data/repositories/agreement_repository_impl.dart';
@@ -42,6 +43,7 @@ import 'presentation/providers/todo_providers.dart';
 import 'presentation/router/app_router.dart';
 import 'presentation/widgets/c50_splash_gate.dart';
 import 'presentation/widgets/course_reminder_bridge.dart';
+import 'presentation/widgets/widget_bridge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,6 +73,16 @@ Future<void> main() async {
     await U04PlatformUtils.realAndroidSdkInt();
     // v1.16.5（S-16 高刷）：启动高刷新率控制器（帧活动→120Hz，静止→省电）。
     RefreshRateController.instance.start();
+  }
+
+  // v1.51.0（F-10 桌面小组件）：安装「原生 → Dart」热启动通道，并读取冷启动
+  //   深链（如 /timetable）。一次性：原生读取后即清空，重复启动回落首页。
+  final String? widgetRoute;
+  if (U04PlatformUtils.isAndroid) {
+    WidgetBridgeService.install();
+    widgetRoute = await WidgetBridgeService.getInitialRoute();
+  } else {
+    widgetRoute = null;
   }
 
   // v1.9.0（S-13）：注册全局异常捕获（FlutterError + PlatformDispatcher），
@@ -124,6 +136,8 @@ Future<void> main() async {
           todoRepositoryProvider.overrideWithValue(todoRepository),
           // v1.50.0（S-25）：记账仓储注入。
           ledgerRepositoryProvider.overrideWithValue(ledgerRepository),
+          // v1.51.0（F-10）：桌面小组件点击深链 → go_router 初始位置。
+          widgetInitialRouteProvider.overrideWithValue(widgetRoute),
         ],
         child: const XiangJuGongApp(),
       ),
@@ -241,8 +255,12 @@ class XiangJuGongApp extends ConsumerWidget {
                       // v1.36.0：课程提醒常驻桥（课表→到点闹钟 / 上课→常驻通知；
                       //   Android 生效，Web 空转透传）。
                       child: CourseReminderBridge(
-                        child: C50SplashGate(
-                          child: child ?? const SizedBox.shrink(),
+                        // v1.51.0（F-10）：桌面小组件数据桥（今日课程快照 →
+                        //   Android 原生 → SharedPreferences → 桌面卡片）。
+                        child: WidgetBridge(
+                          child: C50SplashGate(
+                            child: child ?? const SizedBox.shrink(),
+                          ),
                         ),
                       ),
                     ),

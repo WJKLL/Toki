@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课程卡暗色底：圆角 + 半透明深灰（静态，无主题引用 —— v1.36.0 兼容红线）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#F21C1C1E" />
+    <corners android:radius="20dp" />
+</shape>

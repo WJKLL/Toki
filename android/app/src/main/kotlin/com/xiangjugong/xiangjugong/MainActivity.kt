@@ -12,6 +12,9 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.xiangjugong.xiangjugong.reminder.CountdownForegroundService
 import com.xiangjugong.xiangjugong.reminder.ReminderScheduler
+import com.xiangjugong.xiangjugong.widget.WidgetBridge
+import com.xiangjugong.xiangjugong.widget.WidgetDataStore
+import com.xiangjugong.xiangjugong.widget.WidgetRender
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -213,6 +216,27 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // v1.51.0（F-10 桌面小组件）：与 WidgetBridgeService 的通道名一致。
+        //   writeTodayCourses / clear / getInitialRoute / requestPin。
+        WidgetBridge.attach(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+        // 冷启动：记下「点击卡片」带来的目标路由（Flutter main() 随后一次性取走）。
+        intent?.getStringExtra(WidgetRender.EXTRA_WIDGET_ROUTE)?.let { route ->
+            WidgetDataStore.writePendingRoute(applicationContext, route)
+        }
+    }
+
+    /**
+     * v1.51.0（F-10 桌面小组件）：热启动路径 —— App 已在运行时点击卡片。
+     * launchMode=singleTop 不重建 Activity，故在此接收新 Intent；冷启动
+     * （App 未运行）由 configureFlutterEngine 处理，两条路径共用同一 extra 键。
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(WidgetRender.EXTRA_WIDGET_ROUTE)?.let { route ->
+            WidgetDataStore.writePendingRoute(applicationContext, route)
+            WidgetBridge.pushRoute(route)
+        }
     }
 
     /**

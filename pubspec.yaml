@@ -1,5 +1,5 @@
 name: xiangjugong
-description: "Toki（Converter Toolbox）· Miuix 风格换算工具箱（F-01 ~ F-11）"
+description: "百工箱 · Miuix 风格换算工具箱（F-01 ~ F-11）"
 # 版本号规则见 PROJECT_SPEC.md §1：v1.10.20 补丁（拖拽拉伸幅度减小 + 形变阻尼加大）。
 publish_to: 'none'
 
@@ -15,7 +15,7 @@ publish_to: 'none'
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.50.3+159
+version: 1.51.0+161
 
 environment:
   sdk: ^3.13.2

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  F-10 今日课程卡声明（4x2）。
+
+  · minWidth / minHeight 用 70n-30 标准公式：4 列 = 250dp、2 行 = 110dp。
+    该公式已在红米 K90（HyperOS 4.0 / Android 17）上实测成立：
+    Gmail、Chrome、Telegram、WakeUp 课程表均以 250x110dp 声明 4x2。
+  · targetCellWidth / targetCellHeight 为 API 31+（minSdk 30，低版本忽略）。
+  · updatePeriodMillis = 30 分钟（系统下限）**仅作兜底**：主刷新走
+    Flutter 数据桥写入 + 课程开始/结束的 AlarmManager 精确闹钟。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:initialLayout="@layout/widget_today_courses"
+    android:minHeight="110dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="250dp"
+    android:minWidth="250dp"
+    android:previewLayout="@layout/widget_today_courses"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="4"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen"
+    tools:targetApi="31" />

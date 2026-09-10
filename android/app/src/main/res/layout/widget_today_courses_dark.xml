@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  F-10 今日课程卡（4x2）· 暗色版。
+
+  为什么要两份布局而不是运行时换背景：
+    亮/暗两套底色各自是**静态 drawable**，渲染时按 isDark 直接选布局资源。
+    这样运行时完全不需要 setBackgroundResource / 主题引用（前者不是
+    @RemotableViewMethod，反射调用会被 RemoteViews 校验拒绝；后者正是
+    v1.36.0 桌面渲染异常的根因之一）。
+  结构与 widget_today_courses.xml 严格同构，仅 background 与默认文字色不同
+  （文字色运行时仍会被 setTextColor 覆盖，此处仅是预览兜底）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg_dark"
+    android:orientation="vertical"
+    android:paddingStart="14dp"
+    android:paddingTop="11dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="11dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#FFF2F2F2"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            tools:text="今日课程 · 周三" />
+
+        <TextView
+            android:id="@+id/widget_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:maxLines="1"
+            android:textColor="#99FFFFFF"
+            android:textSize="11sp"
+            tools:text="共 4 门" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row1"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_name1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#FFE8E8E8"
+            android:textSize="11sp"
+            tools:text="高等数学" />
+
+        <TextView
+            android:id="@+id/widget_time1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:maxLines="1"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="08:00-09:40" />
+
+        <TextView
+            android:id="@+id/widget_room1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:maxWidth="76dp"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="A-301" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row2"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_name2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#FFE8E8E8"
+            android:textSize="11sp"
+            tools:text="大学英语" />
+
+        <TextView
+            android:id="@+id/widget_time2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:maxLines="1"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="10:00-11:40" />
+
+        <TextView
+            android:id="@+id/widget_room2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:maxWidth="76dp"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="B-202" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row3"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_name3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#FFE8E8E8"
+            android:textSize="11sp"
+            tools:text="数据结构" />
+
+        <TextView
+            android:id="@+id/widget_time3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:maxLines="1"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="14:00-15:40" />
+
+        <TextView
+            android:id="@+id/widget_room3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:maxWidth="76dp"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp"
+            tools:text="C-105" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_more"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#99FFFFFF"
+        android:textSize="10sp"
+        tools:text="… 等 2 门" />
+
+    <TextView
+        android:id="@+id/widget_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:maxLines="1"
+        android:text="今日无课"
+        android:textColor="#99FFFFFF"
+        android:textSize="12sp"
+        android:visibility="gone" />
+</LinearLayout>

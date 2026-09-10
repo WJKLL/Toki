@@ -2,6 +2,25 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.51.0（2026-09-10）[Android]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 功能 | **桌面小组件「今日课程」卡（F-10 首版）**：4×2（250×110dp）长方形行式卡片，每行从左到右「课程名 → 时间 → 课室」，固定 3 行；标题行显示「今日课程 · 周三」+「共 N 门」，溢出时脚注「… 等 N 门」；进行中课程用课程自身颜色着色；今日无课显示「今日无课」；课室为选填字段，空则留白不占位；节次时间未设置时时间列退化为「第N-M节」。点击整卡跳课表页（R-10 `/timetable`），冷启动与热启动（`singleTop` + `onNewIntent`）两条路径均覆盖。**本期只做 Android 版**，华为/HarmonyOS 走 FormKit 另行规划 | F-10 / R-10 | Android 11+ |
+| 数据 | **桌面小组件数据桥（S-26）**：MethodChannel `xiangjugong/widget`（`writeTodayCourses` / `clear` / `getInitialRoute` / `requestPin`）→ 原生 SharedPreferences `widget_store`（键 `widget.todayCourses`）。Flutter 侧 `buildTodaySnapshot` 是**纯函数**（今日筛选 / 时刻换算 / 状态判定），今日筛选与时刻换算复用自 `course_reminder_bridge` 提取的 `courseSpanOf`（新 `domain/entities/course_span.dart`），通知与卡片口径不会漂移。App 内课表 / 周次 / 节次变更去抖 500ms 写入 | S-26 | Android 11+ |
+| 性能 | **刷新链路零新增依赖**（不引入 WorkManager / Glance）：主刷新走 Flutter 写入即刷；辅以既有课程 AlarmManager 闹钟（`ReminderReceiver` 到点、开机、应用更新、改时间时顺带刷新）；`updatePeriodMillis=1800000` 兜底。原生不做业务计算，仅在渲染时按当前墙钟重算各行状态 —— 因此 App 未运行时「上课中 / 已结束」同样正确 | F-10 / S-26 | Android 11+ |
+| 兼容 | **针对性规避 v1.36.0 桌面小组件失败根因**（当时因 MIUI RemoteViews 渲染空白/塌陷而整体移除）：ViewGroup 嵌套 ≤2 层；固定静态行、不使用集合小组件（`RemoteViewsService`/`ListView`）；零 Bitmap / Canvas；运行时颜色经 `setTextColor` 下发**字面量**；亮暗两套底色改为「选布局资源」而不用 `setBackgroundResource`（该方法不是 `@RemotableViewMethod`，反射调用会被 RemoteViews 校验拒绝）。尺寸取 4×2 标准值 250×110dp（`70n-30` 公式，已在红米 K90 / HyperOS 4 实测：Gmail、Chrome、Telegram 同值） | F-10 | Android 11+ |
+| 修复 | **`Course.periodLabel` 跨节末节号笔误**：跨节分支原为 `'第$start-$start节'`（两处占位符都是 `start`），第 3 节起跨 2 节会显示「第3-3节」；修正为末节 `start + len - 1`。影响课程提醒通知文本、C-33 倒计时卡与本次新增的桌面卡片时间列 | S-15 / P-06 / C-33 | Android 11+ / Web / HarmonyOS |
+| 修复 | **`pubspec.yaml` description 更名遗漏**：v1.50.3 应用更名「百工箱」时漏改该字段（仍为「Toki（Converter Toolbox）· Miuix 风格换算工具箱」），本次补正 | F-01 | 全端 |
+| 测试 | 新增 `test/widget_snapshot_test.dart` 12 用例（今日筛选含单双周与指定周过滤、时刻换算含节次未启用退化、ongoing/past/upcoming 判定、按开始时刻排序、课室空值、overflow、JSON 载荷字段、`periodLabel` 回归）；**全量 151/151 通过**，`analyze lib test` 0 | — | — |
+
+### 涉及编号变更
+- 版本：`1.50.3+159` → `1.51.0+161`（Minor：新增 F-10 桌面小组件功能模块；`+160` 由 HarmonyOS 镜像侧占用）。
+- 新增编号：**S-26**（桌面小组件数据桥）、**F-10**（桌面小组件功能模块）。
+- 原规划中的 S-27 / U-06 / P-21 / C-53 / C-54 / A-06 / R-17 本期**未启用**（单设备 + 简化范围），留待后续版本；详细规格与已知限制见 `PLAN_widget_v1.51.md`。
+- 已知限制：当天最后一节课下课后，卡片最多 30 分钟内仍显示「上课中」（由兜底周期刷新覆盖）。
+
 ## v1.50.3（2026-09-09）[Android] [Web] [HarmonyOS]
 
 ### 变更清单

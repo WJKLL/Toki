@@ -69,6 +69,22 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="course_countdown" />
         </service>
+        <!-- ── v1.51.0（F-10 桌面小组件）：今日课程卡 ────────────────
+             渲染走扁平 RemoteViews（ViewGroup 嵌套 ≤2 层、静态色值、
+             无 Bitmap、不使用集合小组件/RemoteViewsService），以规避
+             v1.36.0 移除桌面小组件时记录的 MIUI 渲染空白/塌陷问题。
+             刷新：Flutter 数据桥写入即刷 + 课程闹钟到点刷 + 30 分钟兜底。 -->
+        <receiver
+            android:name=".widget.TodayCoursesWidgetProvider"
+            android:exported="true"
+            android:label="今日课程">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_courses_info" />
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
