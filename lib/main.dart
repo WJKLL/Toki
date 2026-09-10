@@ -75,14 +75,15 @@ Future<void> main() async {
     RefreshRateController.instance.start();
   }
 
-  // v1.51.0（F-10 桌面小组件）：安装「原生 → Dart」热启动通道，并读取冷启动
-  //   深链（如 /timetable）。一次性：原生读取后即清空，重复启动回落首页。
-  final String? widgetRoute;
+  // v1.51.0（F-10 桌面小组件）：安装「原生 → Dart」通道，并读取冷启动深链
+  //   （如 /timetable）。一次性：原生读取后即清空。
+  // v1.51.5：冷启动深链不再交给 go_router 的 initialLocation（那会让导航栈里
+  //   只有课表页、没有首页垫底，侧滑返回直接退出 App），而是与热启动统一走
+  //   WidgetBridgeService.pendingRoute，由 WidgetBridge 在首帧后 push 到目标页。
   if (U04PlatformUtils.isAndroid) {
     WidgetBridgeService.install();
-    widgetRoute = await WidgetBridgeService.getInitialRoute();
-  } else {
-    widgetRoute = null;
+    final String? widgetRoute = await WidgetBridgeService.getInitialRoute();
+    if (widgetRoute != null) WidgetBridgeService.pendingRoute.value = widgetRoute;
   }
 
   // v1.9.0（S-13）：注册全局异常捕获（FlutterError + PlatformDispatcher），
@@ -136,8 +137,6 @@ Future<void> main() async {
           todoRepositoryProvider.overrideWithValue(todoRepository),
           // v1.50.0（S-25）：记账仓储注入。
           ledgerRepositoryProvider.overrideWithValue(ledgerRepository),
-          // v1.51.0（F-10）：桌面小组件点击深链 → go_router 初始位置。
-          widgetInitialRouteProvider.overrideWithValue(widgetRoute),
         ],
         child: const XiangJuGongApp(),
       ),

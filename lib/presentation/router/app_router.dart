@@ -69,16 +69,14 @@ Page<Object?> _pageFor(BuildContext context, Widget child) {
   );
 }
 
-/// v1.51.0（F-10）：桌面小组件点击带来的启动深链（如 `/timetable`）。
-/// 由 main() 在 runApp 前经 WidgetBridgeService.getInitialRoute() 读入并 override；
-/// 无小组件点击时保持 null → 回落默认首页。
-final widgetInitialRouteProvider = Provider<String?>((ref) => null);
-
 final appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
     // v1.43.0(P-10)：待办为底栏最左(index 0)，但默认启动仍落首页(page=1)。
-    // v1.51.0（F-10）：桌面小组件点击 → 直达对应页（一次性；原生读取后已清空）。
-    initialLocation: ref.watch(widgetInitialRouteProvider) ?? '/?page=1',
+    // v1.51.5 修复（桌面小组件深链）：启动位置**恒为首页** —— 小组件深链改由
+    //   WidgetBridge 在首帧后 `push` 到目标页（见 widget_bridge.dart）。
+    //   若把深链直接当作 initialLocation，导航栈里就只有课表页、没有首页垫底，
+    //   侧滑返回会无处可退而直接退出 App 掉回桌面。
+    initialLocation: '/?page=1',
     redirect: (context, state) {
       final String path = state.uri.path;
       // v1.10.3（S-13 覆盖增强）：路由跳转日志（开关关闭时零成本）。

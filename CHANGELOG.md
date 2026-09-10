@@ -2,6 +2,17 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.51.5（2026-09-10）[Android]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **从桌面卡片进入课表后侧滑返回会直接掉回桌面**：深链此前用 go_router 的 `initialLocation` 实现（`initialLocation: '/timetable'`），导致导航栈里**只有课表页、缺少首页垫底** —— 侧滑返回时 Flutter 无处可退，把返回事件交还系统，于是直接退出 App 回到桌面；热启动路径用 `router.go()` 同理（`go` 会**替换**整个导航栈）。改为：**启动位置恒为首页**（`'/?page=1'`），小组件深链与热启动统一走 `WidgetBridgeService.pendingRoute`，由 `WidgetBridge` 在首帧后 **`push`** 到目标页 —— 目标页叠在首页之上，返回行为与「从 App 内进入课表」完全一致 | F-10 / R-10 / S-26 | Android 11+ |
+| 重构 | 删除 `widgetInitialRouteProvider`（其唯一用途就是把深链喂给 `initialLocation`）；`main()` 读到冷启动深链后写入 `pendingRoute`，使**冷/热启动统一一条路径**；`WidgetBridge` 在首帧后主动消费一次（`main()` 的写入时机早于 `initState` 注册监听，收不到通知） | F-10 / S-26 | Android 11+ |
+
+### 涉及编号变更
+- 版本：`1.51.4+165` → `1.51.5+166`（桌面卡片深链返回栈修复）。
+
 ## v1.51.4（2026-09-10）[Android]
 
 ### 变更清单

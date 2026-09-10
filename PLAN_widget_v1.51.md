@@ -9,6 +9,7 @@
 > **v1.51.2 修订**：实机 4×2 实际渲染 176dp 而内容原仅约 106dp（居中后上下各空 35dp），故课程名 16 → **22sp**，各行改用 `layout_marginBottom` 分配间距（8 / 4 / 6 / 5dp），各行合计约 119dp、加 padding 后总占用约 141dp。**尺寸声明仍未动**；代价是缩到声明下限 110dp 时底部「下一节行」会被裁。
 > **v1.51.4 修订（深色模式）**：卡片亮暗改由 **`@color` 资源 + `values-night` 限定符**自动切换 —— 布局内所有颜色改为资源引用，渲染器**不再下发 `setTextColor`**（运行时字面量一旦下发就与系统 uiMode 脱钩）。原「两套布局 + `isDark` 字段」方案与 `widget_today_courses_dark.xml` 一并废弃；`MainActivity` 另动态注册 `ACTION_CONFIGURATION_CHANGED` 作为加速。
 > 关键教训：**系统切换深色模式不会通知 AppWidgetProvider**，因此任何「等某个触发源来刷新」的方案都只能表现为「必须打开 App 才变色」（v1.51.1 ~ v1.51.3 连续三版都栽在这里）。资源限定符是唯一不依赖触发源的机制。
+> **v1.51.5 修订（深链返回栈）**：深链**不能用 go_router 的 `initialLocation`、也不能用 `go()`** —— 两者都会让导航栈里只剩目标页、缺首页垫底，用户从课表页侧滑返回时会无处可退而**直接退出 App 掉回桌面**。正确做法：启动位置恒为首页（`'/?page=1'`），深链在首帧后用 **`push`** 追加，冷/热启动统一走 `WidgetBridgeService.pendingRoute` 一条路径。
 > **华为 / HarmonyOS 不在本规划内**（走 FormKit，另行规划）
 
 ---
@@ -168,7 +169,7 @@ v1.51.4 起 MainActivity 另动态注册 ACTION_CONFIGURATION_CHANGED 触发刷�
 RemoteViews 点击 → PendingIntent.getActivity(MainActivity, extra "widget_route"="/timetable")
   → MainActivity.onNewIntent 读取 extra → WidgetBridge 暂存
   → Flutter 启动时 getInitialRoute() 取走（一次性）
-  → appRouterProvider 的 initialLocation
+  → WidgetBridge 首帧后 **push** 到目标页（**不能**走 initialLocation）
 ```
 
 冷启动与热启动（`singleTop` + `onNewIntent`）两条路径都要覆盖。

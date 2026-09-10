@@ -56,14 +56,20 @@ class _WidgetBridgeState extends ConsumerState<WidgetBridge>
     super.dispose();
   }
 
-  /// 消费一次热启动路由（**先清空再跳转**，避免重建时重复导航）。
+  /// 消费一次深链（**先清空再跳转**，避免重建时重复导航）。
+  ///
+  /// v1.51.5 修复：必须用 `push` 而非 `go` —— `go` 会**替换整个导航栈**（栈里只剩
+  /// 目标页），用户从课表页侧滑返回时无处可退，会直接退出 App 掉回桌面。
+  /// `push` 则把目标页叠在首页之上，返回行为与从 App 内进入课表完全一致。
   void _onOpenRoute() {
     final String? route = WidgetBridgeService.pendingRoute.value;
     if (route == null || route.isEmpty) return;
     WidgetBridgeService.pendingRoute.value = null;
     if (!mounted) return;
     try {
-      ref.read(appRouterProvider).go(route);
+      // push 返回 Future（go 返回 void），此处 fire-and-forget：导航结果不影响
+      // 卡片链路，故用 unawaited 显式丢弃。
+      unawaited(ref.read(appRouterProvider).push(route));
     } catch (_) {
       // 路由不存在等异常不影响卡片链路。
     }
@@ -91,7 +97,11 @@ class _WidgetBridgeState extends ConsumerState<WidgetBridge>
       ref.listen(currentClassProvider, (_, _) => _schedule());
       // 首帧后投递一次（覆盖「启动即有数据」冷启动场景）。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _schedule();
+        if (!mounted) return;
+        _schedule();
+        // v1.51.5：消费冷启动深链。main() 可能在 initState 之前就把值写进了
+        //   pendingRoute（那一刻监听器还没挂上，收不到通知），故此处主动查一次。
+        _onOpenRoute();
       });
     }
     return widget.child;
