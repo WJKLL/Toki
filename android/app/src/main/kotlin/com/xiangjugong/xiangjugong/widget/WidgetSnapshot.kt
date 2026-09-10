@@ -22,6 +22,7 @@ internal data class Snapshot(
     val nextLine: String,
     /** 剩余 N 分钟（仅上课中；空 = 隐藏）。 */
     val remainText: String,
+    /** 写入时的亮暗模式；v1.51.3 起渲染**不再依据它**（见 WidgetRender.isSystemNight）。 */
     val isDark: Boolean,
 )
 

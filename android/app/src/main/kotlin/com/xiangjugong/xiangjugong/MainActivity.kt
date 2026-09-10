@@ -2,10 +2,14 @@ package com.xiangjugong.xiangjugong
 
 import android.Manifest
 import android.app.AlarmManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.ContentValues
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
@@ -14,6 +18,7 @@ import com.xiangjugong.xiangjugong.reminder.CountdownForegroundService
 import com.xiangjugong.xiangjugong.reminder.ReminderScheduler
 import com.xiangjugong.xiangjugong.widget.WidgetBridge
 import com.xiangjugong.xiangjugong.widget.WidgetDataStore
+import com.xiangjugong.xiangjugong.widget.WidgetRefresh
 import com.xiangjugong.xiangjugong.widget.WidgetRender
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -22,6 +27,41 @@ import java.io.File
 import java.io.FileInputStream
 
 class MainActivity : FlutterActivity() {
+    /**
+     * v1.51.4（F-10 桌面小组件）：系统配置变化（含深色模式切换）→ 立即刷新卡片。
+     *
+     * 为什么需要它：卡片配色走 @color 资源（values-night 自动切换），而资源只在
+     * **重新 inflate 布局**时才被解析 —— 若 Launcher 此刻没重建视图，卡片就仍是旧配色；
+     * 且系统切换深色模式时**不会通知 AppWidgetProvider**。因此在 App 存活期间由这里
+     * 主动触发一次刷新，让 Launcher 立刻用新的 uiMode 重新 inflate。
+     * （ACTION_CONFIGURATION_CHANGED 只支持动态注册 —— Android 7+ 禁止静态注册。）
+     *
+     * 注意这只是「加速」而非「必需」：即使 App 不在，Launcher 自身在配置变化时重建
+     * 卡片视图也会让 @color 自动解析到新档位 —— 这正是 v1.51.4 改用资源的原因。
+     */
+    private val configChangeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            WidgetRefresh.refreshTodayCourses(applicationContext)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        registerReceiver(
+            configChangeReceiver,
+            IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED),
+        )
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(configChangeReceiver)
+        } catch (_: IllegalArgumentException) {
+            // onCreate 异常路径下可能未注册，忽略。
+        }
+        super.onDestroy()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // v1.9.0（S-13 导出）：与 LogExportService 的 MethodChannel 名一致。

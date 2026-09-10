@@ -2,6 +2,35 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.51.4（2026-09-10）[Android]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **桌面卡片深色模式仍须打开 App 才切换（v1.51.3 没修好）**：v1.51.3 让原生「按系统 uiMode 选两套布局」，但**系统切换深色模式时不会通知 AppWidgetProvider** —— 没有任何触发源会调用 `onUpdate`，于是仍表现为「必须打开 App 写一次快照才变色」。本版改用**资源限定符方案**：新增 `res/values/colors.xml` 与 `res/values-night/colors.xml`（`widget_text_primary` / `widget_text_secondary` / `widget_accent` / `widget_bg` 四档同名资源），布局内所有文字色与卡片底色改为 `@color` 引用，**渲染器不再下发任何 `setTextColor`**。Launcher 在配置变化时重新 inflate 布局，资源系统即自动解析到对应档位 —— **不需要任何触发源** | F-10 / S-26 | Android 11+ |
+| 修复 | **运行时字面量色值与 uiMode 脱钩（根因）**：RemoteViews 的运行时 action 只能下发字面量（`setTextColor(int)` 无法传资源引用），一旦下发就与系统 uiMode 脱钩。本版移除全部 7 处 `setTextColor` 调用，配色权完全交给资源系统 | S-26 | Android 11+ |
+| 新增 | **原生配置变化监听（加速用，非必需）**：`MainActivity` 动态注册 `ACTION_CONFIGURATION_CHANGED`（Android 7+ 只允许动态注册），收到即 `WidgetRefresh.refreshTodayCourses()` —— App 存活时切换深色秒级生效，不必等 Launcher 自行重建 | F-10 | Android 11+ |
+| 精简 | 全卡收敛为**单一布局**：删除 `widget_today_courses_dark.xml` 与 `widget_bg_light.xml` / `widget_bg_dark.xml`，合并为 `widget_bg.xml`（颜色走 `@color/widget_bg`）。渲染器删去亮暗分支、`isSystemNight()` 判定与 5 个颜色常量 | F-10 | Android 11+ |
+| 说明 | 尺寸声明依旧未动（`widget_today_courses_info.xml` 无 diff）。`@color` 是**静态资源查表**，区别于 `?attr` 主题属性解析（后者需在 Launcher 进程解析本应用主题，是 v1.36.0 卡片渲染异常的成因之一）；项目自 v1.44.x 起已在启动屏使用 `values-night` 限定符，该机制真机已验证可用 | F-10 | Android 11+ |
+| 测试 | `analyze lib test` 0 issues；全量 154/154 通过（Dart 侧未改契约）。真机：待切换系统深色模式验证「无需打开 App 即自动切换」 | — | — |
+
+### 涉及编号变更
+- 版本：`1.51.3+164` → `1.51.4+165`（桌面卡片深色模式跟随改用资源限定符）。
+- 废弃资源：`layout/widget_today_courses_dark.xml`、`drawable/widget_bg_light.xml`、`drawable/widget_bg_dark.xml`。
+
+## v1.51.3（2026-09-10）[Android]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| 修复 | **桌面卡片深色模式跟随失效**：原实现由 Flutter 侧读 `Theme.brightness` 写入快照的 `isDark`、原生据此选亮/暗布局。但该字段**只在 App 运行时才会被重写** —— App 被杀 / 手机重启后会冻结成旧值，而 30 分钟兜底刷新只是「重读快照」、并不重新判定主题，**卡片会永远停在旧配色直到 App 再次被打开**。改为**原生每次渲染现读系统 `uiMode`**（与 AppCompat 同判定方式）：所有渲染入口（课程闹钟到点、开机 / 应用更新广播、周期兜底、Flutter 主动写入）都取当时真实的深色状态 —— App 运行时秒级跟随，App 不在时最多 30 分钟自动纠正（此前是「永不纠正」） | F-10 / S-26 | Android 11+ |
+| 修复 | **App 运行时的深色切换响应**：`WidgetBridge` 由 `didChangeDependencies`（依赖 `Theme.of` 的隐式继承依赖）改为显式实现 `WidgetsBindingObserver.didChangePlatformBrightness()`，语义即「系统深色模式变了」；快照 `isDark` 字段降级为**仅诊断用**（保留字段以维持载荷契约 v2，不再作为渲染依据） | S-26 | Android 11+ |
+| 说明 | 尺寸声明依旧未动（`widget_today_courses_info.xml` 无 diff）。取舍记录：曾评估「资源限定符（`values-night` + `@color/`）」方案 —— 它更接近 Android 官方做法且完全不需要 App 参与，但其正确性押在 launcher 是否在配置变化时重建 `AppWidgetHostView`（HyperOS 上无法预先确认）；本方案不依赖任何 launcher 行为，故采用 | F-10 | Android 11+ |
+| 测试 | `analyze lib test` 0 issues；全量 154/154 通过（载荷契约未变，用例无需改动）。真机验证：`adb shell cmd uimode night yes/no` 切换系统深色模式后，对卡片区域做像素亮度分析，亮/暗两次数值分离 | — | — |
+
+### 涉及编号变更
+- 版本：`1.51.2+163` → `1.51.3+164`（桌面卡片深色模式跟随修复）。
+
 ## v1.51.2（2026-09-10）[Android]
 
 ### 变更清单

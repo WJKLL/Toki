@@ -55,7 +55,9 @@ class WidgetSnapshot {
   ///   故降级为等义的文本。）
   final String remainText;
 
-  /// 亮暗模式 → 原生据此切换 `widget_bg_light` / `widget_bg_dark` 布局。
+  /// 写入时的亮暗模式（**仅诊断用**）。
+  /// v1.51.3 起原生**不再据此选布局** —— 原生每次渲染都现读系统 `uiMode`，
+  /// 否则 App 被杀 / 手机重启后该字段会冻结成旧值、卡片永远停在旧配色。
   final bool isDark;
 
   /// 写入时间戳（毫秒；诊断用）。

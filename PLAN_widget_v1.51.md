@@ -7,6 +7,8 @@
 > 关联编号：**S-26**（数据桥）/ **F-10**（功能模块）/ R-10（课表路由）
 > **v1.51.1 修订**：卡面由「今日课程三列列表」改为「当前 / 下一节课**焦点卡**」，结构、文案、配色逐条对齐鸿蒙版服务卡片（`harmonyos_port` 的 `TodayCourseCard.ets` 与 `lib/core/cards/course_card_sync.dart`）。**尺寸声明一字未动**（仍是 250×110dp / 4×2）。
 > **v1.51.2 修订**：实机 4×2 实际渲染 176dp 而内容原仅约 106dp（居中后上下各空 35dp），故课程名 16 → **22sp**，各行改用 `layout_marginBottom` 分配间距（8 / 4 / 6 / 5dp），各行合计约 119dp、加 padding 后总占用约 141dp。**尺寸声明仍未动**；代价是缩到声明下限 110dp 时底部「下一节行」会被裁。
+> **v1.51.4 修订（深色模式）**：卡片亮暗改由 **`@color` 资源 + `values-night` 限定符**自动切换 —— 布局内所有颜色改为资源引用，渲染器**不再下发 `setTextColor`**（运行时字面量一旦下发就与系统 uiMode 脱钩）。原「两套布局 + `isDark` 字段」方案与 `widget_today_courses_dark.xml` 一并废弃；`MainActivity` 另动态注册 `ACTION_CONFIGURATION_CHANGED` 作为加速。
+> 关键教训：**系统切换深色模式不会通知 AppWidgetProvider**，因此任何「等某个触发源来刷新」的方案都只能表现为「必须打开 App 才变色」（v1.51.1 ~ v1.51.3 连续三版都栽在这里）。资源限定符是唯一不依赖触发源的机制。
 > **华为 / HarmonyOS 不在本规划内**（走 FormKit，另行规划）
 
 ---
@@ -118,15 +120,21 @@ WorkManager 周期刷新 · Jetpack Glance · U-06 厂商适配层 · P-21 管�
 android/app/src/main/kotlin/com/xiangjugong/xiangjugong/widget/
 ├─ WidgetDataStore.kt            // SharedPreferences 读写
 ├─ WidgetBridge.kt               // MethodChannel "xiangjugong/widget" 处理器
-├─ WidgetRefresh.kt              // 统一刷新入口（读快照 → 渲染 → 广播）
-├─ TodayCoursesWidgetProvider.kt // AppWidgetProvider
-└─ WidgetClickReceiver.kt        // 点击 → PendingIntent → MainActivity
+├─ WidgetSnapshot.kt             // 载荷模型与解析（契约 v2，对齐鸿蒙版）
+├─ WidgetRender.kt               // RemoteViews 渲染（单布局；不下发任何颜色）
+├─ WidgetRefresh.kt              // 统一刷新入口（读快照 → 渲染 → 推给桌面）
+└─ TodayCoursesWidgetProvider.kt // AppWidgetProvider（onUpdate）
 
 android/app/src/main/res/
-├─ layout/widget_today_courses.xml
-├─ drawable/widget_bg_light.xml
-├─ drawable/widget_bg_dark.xml
-└─ xml/widget_today_courses_info.xml
+├─ layout/widget_today_courses.xml   // 单一布局（亮暗由 @color 自动切换）
+├─ drawable/widget_bg.xml            // 卡片底：圆角 + @color/widget_bg
+├─ values/colors.xml                 // widget_* 浅色档
+├─ values-night/colors.xml           // widget_* 深色档（资源系统自动选用）
+└─ xml/widget_today_courses_info.xml // **尺寸声明**（250x110dp / 4x2，勿动）
+
+点击不经 Receiver —— RemoteViews 的 PendingIntent 直接拉起 MainActivity，
+由 configureFlutterEngine（冷启动）/ onNewIntent（热启动）读取 extra。
+v1.51.4 起 MainActivity 另动态注册 ACTION_CONFIGURATION_CHANGED 触发刷新。
 ```
 
 **Manifest 注册**：一个 `<receiver>`，`android:exported="true"`，intent-filter 含

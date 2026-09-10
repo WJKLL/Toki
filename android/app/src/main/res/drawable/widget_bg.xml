@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  今日课程卡底：圆角 + 半透明。
+  颜色取自 @color/widget_bg —— 浅色档白（#F2FFFFFF）、深色档深灰（#F21C1C1E），
+  由 res/values/ 与 res/values-night/ 的 colors.xml 分别提供，随系统 uiMode 自动切换。
+  （原 widget_bg_light.xml / widget_bg_dark.xml 两个文件于 v1.51.4 合并为本文件。）
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_bg" />
+    <corners android:radius="20dp" />
+</shape>

@@ -2,4 +2,12 @@
 <resources>
     <!-- v1.44.x 原生启动屏背景色（深色主题；近似 Miuix 深色 surface）。 -->
     <color name="splash_background">#FF121212</color>
+
+    <!-- ── v1.51.4（F-10 桌面小组件）配色 · 深色档 ─────────────────────
+         与 res/values/colors.xml 中的同名资源一一对应；系统 uiMode=night 时
+         资源系统自动选用本文件（无需任何运行时通知）。 -->
+    <color name="widget_text_primary">#FFFFFFFF</color>
+    <color name="widget_text_secondary">#FF9E9E9E</color>
+    <color name="widget_accent">#FF3482FF</color>
+    <color name="widget_bg">#F21C1C1E</color>
 </resources>

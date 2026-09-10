@@ -31,25 +31,26 @@ class WidgetBridge extends ConsumerStatefulWidget {
   ConsumerState<WidgetBridge> createState() => _WidgetBridgeState();
 }
 
-class _WidgetBridgeState extends ConsumerState<WidgetBridge> {
+class _WidgetBridgeState extends ConsumerState<WidgetBridge>
+    with WidgetsBindingObserver {
   /// 首次 build 完成监听注册与首帧投递（ref.listen 必须在 build 内调用）。
   bool _booted = false;
 
   /// 变更去抖（连续编辑课表不产生多次写入与桌面刷新）。
   Timer? _debounce;
 
-  /// 上次投递时的亮暗模式（主题切换时需重写快照换背景）。
-  bool? _lastDark;
-
   @override
   void initState() {
     super.initState();
     // 热启动：App 已在运行时点击卡片 → 原生推来路由 → go_router 跳转。
     WidgetBridgeService.pendingRoute.addListener(_onOpenRoute);
+    // v1.51.3：系统深浅色切换回调（App 保活时秒级刷新卡片配色）。
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     WidgetBridgeService.pendingRoute.removeListener(_onOpenRoute);
     _debounce?.cancel();
     super.dispose();
@@ -68,13 +69,12 @@ class _WidgetBridgeState extends ConsumerState<WidgetBridge> {
     }
   }
 
+  /// v1.51.3：系统深色模式切换。
+  /// 原生侧已改为**每次渲染现读系统 uiMode**（因此 App 不在运行时，下一次任何
+  /// 刷新入口 —— 课程闹钟、开机广播、30 分钟兜底 —— 都会自动纠正配色）；
+  /// 本回调只负责让 App **正在运行时**立刻刷新，不必等兜底周期。
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    if (_lastDark != null && _lastDark != dark) _schedule();
-    _lastDark = dark;
-  }
+  void didChangePlatformBrightness() => _schedule();
 
   @override
   Widget build(BuildContext context) {

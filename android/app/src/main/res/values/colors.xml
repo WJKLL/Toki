@@ -3,4 +3,21 @@
     <!-- v1.44.x 原生启动屏背景色（浅色主题；与 Flutter surface 近似，与 C-50
          品牌层同底色，冷启动过渡无缝）。 -->
     <color name="splash_background">#FFFFFFFF</color>
+
+    <!-- ── v1.51.4（F-10 桌面小组件）配色 · 浅色档 ─────────────────────
+         深色档见 res/values-night/colors.xml 的同名资源，系统按 uiMode 自动选用。
+
+         颜色必须走 @color 资源、不能用运行时 setTextColor：RemoteViews 的运行时
+         action 只能下发**字面量**色值（setTextColor(int) 无法传资源引用），一旦
+         下发就与系统 uiMode 脱钩；而系统切换深色模式时**不会通知
+         AppWidgetProvider**（也没有其他触发源），卡片便只能等下一次刷新才可能变色。
+         改为 @color 后，Launcher 在配置变化时重新 inflate 布局即自动取到对应档位
+         —— 这是 Android 对 AppWidget 深色模式的标准做法。
+
+         注：@color 是**静态资源查表**，区别于 ?attr 主题属性解析 —— 后者需要在
+         Launcher 进程里解析本应用的主题，正是 v1.36.0 桌面小组件渲染异常的成因之一。 -->
+    <color name="widget_text_primary">#FF111111</color>
+    <color name="widget_text_secondary">#FF8A8A92</color>
+    <color name="widget_accent">#FF3482FF</color>
+    <color name="widget_bg">#F2FFFFFF</color>
 </resources>
