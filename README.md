@@ -1,16 +1,18 @@
 <p align="center">
-  <img src="docs/icon.png" width="96" alt="Toki 图标"/>
+  <img src="docs/icon.png" width="96" alt="百工箱 图标"/>
 </p>
 
-# Toki（箱具工 → Toki）
+# 百工箱
 
-**Miuix 风格工具箱（个人使用为主）** · Flutter 应用，Android 11+ / Web · **HarmonyOS NEXT（见独立仓库）**
+**Miuix 风格换算 / 生活工具箱（个人使用为主）** · Flutter 应用，Android 11+ / Web · **HarmonyOS NEXT（见独立仓库）**
 
-Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：实时待办与流程图编辑器、课程倒计时常驻通知、课表管理、每日一言，以及可扩展的「工具页」（**60+ 个实用工具 / 15 分类**：Steam/MC 查询、必应壁纸、二维码、IP、一言、MD5/Base64/AES、时间戳/农历、翻译、热榜、菜谱、搜索等）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
+百工箱是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：实时待办与流程图编辑器、课程倒计时常驻通知、**桌面课程小组件**、课表管理、**记账**、每日一言，以及可扩展的「工具页」（**60+ 个实用工具 / 15 分类**：Steam/MC 查询、必应壁纸、二维码、IP、一言、MD5/Base64/AES、时间戳/农历、翻译、热榜、菜谱、搜索等）。界面全部基于 [flutter_miuix](https://pub.dev/packages/flutter_miuix) 组件（禁用 Material 视觉），追求 MIUI 原生质感与低功耗（Skia 渲染，Impeller 关闭）。
+
+> **名称沿革**：项目曾用名 **Toki**；因 App 备案（阿里云）需中文简称，自 **v1.50.3** 起更名为「**百工箱**」——各类工具的汇集之意。GitHub 仓库名 `WJKLL/Toki` 与相册目录 `Pictures/Toki` 保持不变。
 
 下载方式：**GitHub Releases**（APK / Web 产物;鸿蒙 HAP 见 [Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS) 的 Releases） / 蓝奏云:    (https://wwami.lanzouq.com/b01giaeweh 密码:8jpk)
 
-> 本仓库为项目开源镜像版本，同步自内部开发主线（当前 v1.49.1）。**HarmonyOS NEXT 移植版独立仓库：[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（源码与 HAP 分离管理）。
+> 本仓库为项目开源镜像版本，同步自内部开发主线（当前 **v1.51.4**）。**HarmonyOS NEXT 移植版独立仓库：[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（源码与 HAP 分离管理）。
 
 ---
 
@@ -18,14 +20,16 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 | 模块 | 说明 |
 | :--- | :--- |
+| **桌面小组件** | **今日课程卡（F-10，v1.51.0~v1.51.4）**：4×2 长方形焦点卡 —— 标题/周次 → 当前或下一节课标签（强调色）→ 课程名大字 → 教室 → 下一节行；点整卡直达课表页（冷/热启动均支持）；**深浅色随系统自动切换**（资源限定符方案，无需打开 App）；无课/放学/未添加三种空态各有文案 |
+| **记账** | **记账一级页（S-25 / P-20，v1.50.0）**：单月视图 + 月份导航 + 汇总卡（支出/收入/结余）+ 按日分组流水；右下毛玻璃 FAB「记一笔」；长按流水卡编辑/删除；**月度预算**；首页拆为「剩余环」+「支出」两张卡（本日/本周/本月/本年四档）；内置 **12 个一级支出分类**（购物下挂 13 个二级）+ **5 个收入分类**，金额一律以「分」为单位的 int 存储 |
 | **待办与提醒** | 待办页单日视图 + 日期导航（左右切日 / 月历选日）、完成即归档（回收站恢复/删除）；首页实时「待办」卡（今日完成/总任务/待办 + 分段进度，点击直达待办页）；**上课常驻通知**（课程倒计时 Android 前台服务，锁屏/后台常显）+ 上课/下课提醒 |
 | **流程图编辑器** | 内嵌 vyuh_node_flow 内核（含专有触摸/体验补丁）：FlowDoc(v2) 持久化与旧数据自动迁移；泳道分区、节点锁定、连接校验、复制粘贴；**逻辑播放**（判断分支选路、连线流光动画）、HTML 可播放导出；竖屏悬浮工具箱 / 宽屏三段式、PC 键盘与 hover |
-| **首页网格** | 问候语 + 每日一言（多 API 免注册）、实时待办卡、今日剩余仪表盘、课程倒计时；卡片网格**拖拽排序**、**长按编辑态一键移除**、响应式 2/3/4 列 |
+| **首页网格** | 问候语 + 每日一言（多 API 免注册）、实时待办卡、今日剩余仪表盘、课程倒计时、记账双卡；卡片网格**拖拽排序**、**长按编辑态一键移除**、响应式 2/3/4 列 |
 | **课表** | 周网格大课表编辑、Excel 导入（.xls/.xlsx）、16 节次时间表、当前/下一节自动判定 |
 | **每日活动** | 每日起止时间编辑（默认 09:00–18:00）、今日剩余进度 |
 | **工具页** | 工具目录 JSON 外部化（`assets/tools/tools.json`，**加新工具零代码**）、15 分类折叠分组；**Steam 用户查询**定制页（4 格式识别）；通用工具页 `/tool/:id` 自动按类型渲染结果（文本/键值/列表/图片），无参工具进页即出；凭证走系统加密存储 |
 | **主题系统** | 深色模式、Monet 动态取色、自定义种子色、多种调色板；**毛玻璃动效开关**（低性能档自动降级） |
-| **沉浸光感** | 卡片 / 底栏液态指示器 / 宽屏侧边栏 / 分段选择器选中项的边缘光感 + 按压光圈；**档位可配**（设置 → 外观 → 沉浸光感：关 / 标准 / 丰富）；纯 Canvas 绘制、零额外模糊、静止零重绘（深色生效，浅色仅导航组件） |
+| **沉浸光感** | 卡片 / 底栏液态指示器 / 宽屏侧边栏 / 分段选择器选中项的边缘光感 + 按压光圈；**档位可配**（设置 → 外观 → 沉浸光感：关 / 标准 / 丰富）；纯 Canvas 绘制、零额外模糊、静止零重绘（深色生效，浅色仅导航组件）；**滚动期禁按压光圈**（GLOW-04，治首页纵向滚动起始掉帧） |
 | **液态玻璃底栏** | KernelSU 风格液态玻璃底栏内核（按压阻尼 / 内阴影 / 折射），顶栏/悬浮按钮全链路 HyperOS 毛玻璃（Backdrop 实时采样），窄屏底栏 / 宽屏侧边栏自适应；**默认通栏形态，「悬浮底栏」在设置中开启后为悬浮胶囊** |
 | **性能** | 120Hz 高刷智能管理（空闲释放）、模糊降级策略、懒加载二级页、静止零 Ticker |
 
@@ -40,7 +44,7 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 **完整操作演示（2026-09-09）** —— 新版本实机录屏：
 
-<img src="docs/demo/toki-demo-20260909.gif" width="320" alt="Toki 完整使用演示"/>
+<img src="docs/demo/toki-demo-20260909.gif" width="320" alt="百工箱 完整使用演示"/>
 
 > 📹 完整版（含声音）：[GitHub 页面内播放](https://github.com/WJKLL/Toki/blob/main/docs/demo/toki-demo-20260909.mp4) · [直接下载 MP4](https://github.com/WJKLL/Toki/raw/main/docs/demo/toki-demo-20260909.mp4)
 
@@ -50,7 +54,9 @@ Toki 是一个以 **MIUI / Miuix 设计语言**打造的个人效率工具箱：
 
 ## 🧩 HarmonyOS NEXT 移植版
 
-源代码不在此仓库,独立维护于 **[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（Flutter-OH 镜像：桌面「今日课程」实况卡片 / 课程提醒 / HUKS 凭证加密等鸿蒙能力），HAP 产物发布在其 Releases。
+源代码不在此仓库,独立维护于 **[WJKLL/Toki-HarmonyOS](https://github.com/WJKLL/Toki-HarmonyOS)**（Flutter-OH 镜像：桌面「今日课程」实况服务卡片 / 课程提醒 / HUKS 凭证加密等鸿蒙能力），HAP 产物发布在其 Releases。
+
+> 注：Android 与 HarmonyOS 的桌面课程卡片**机制完全不同**——Android 走 AppWidget（RemoteViews 扁平布局 + 资源限定符切深浅色），鸿蒙走 FormKit（`FormExtensionAbility` + ArkTS 声明式卡片）。
 
 ---
 
@@ -93,6 +99,7 @@ lib/
 ├─ main.dart                  应用入口：ProviderScope + 主题装配 + go_router + 全局滚动
 ├─ core/                      基础设施：常量 / 工具 / 日志 / 性能 / 通用小组件
 │  ├─ widgets/                通用组件（app_icons、mini_toast、steam_logo_icon…）
+│  ├─ widget/                 桌面小组件数据桥（S-26：快照构建 + MethodChannel）
 │  ├─ tools/                  Steam API 客户端与凭证存储
 │  ├─ quotes/                 每日一言服务（S-21）
 │  ├─ refresh_rate/           高刷控制器
@@ -102,9 +109,9 @@ lib/
 └─ presentation/
    ├─ shell/                  主框架：底栏/侧边栏 + PageView 一级页
    ├─ router/                 路由表（go_router）与 MIUI 风格转场
-   ├─ providers/              Riverpod 状态（主题/课表/卡片/工具目录…）
-   ├─ features/               页面（首页/工具/设置/课表/关于…）
-   └─ widgets/                组件：C-21~C-39 + cards/ + kernel/（底栏内核）
+   ├─ providers/              Riverpod 状态（主题/课表/卡片/记账/工具目录…）
+   ├─ features/               页面（首页/工具/设置/课表/记账/关于…）
+   └─ widgets/                组件：C-21~C-52 + cards/ + kernel/（底栏内核）
 android/  web/  test/         平台壳与测试
 tools/                        开发辅助脚本
 ```
@@ -130,6 +137,7 @@ tools/                        开发辅助脚本
 - **功能 → minor，修复/优化 → patch**；版本号只升不降。
 - 版本号同步维护于：`pubspec.yaml` + `lib/core/constants/app_constants.dart` + `CHANGELOG.md`。
 - 完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+- 桌面小组件的完整设计与踩坑记录见 [PLAN_widget_v1.51.md](PLAN_widget_v1.51.md)。
 
 ## 📄 许可证
 
