@@ -2,6 +2,21 @@
 
 > 模板与规则见 `PROJECT_SPEC.md` §1.4 / §14；版本号只升不降、不可复用。
 
+## v1.51.1（2026-09-10）[Android]
+
+### 变更清单
+| 变更类型 | 变更说明 | 涉及编号 | 平台兼容性 |
+| :--- | :--- | :--- | :--- |
+| UI | **桌面卡片结构对齐鸿蒙版服务卡片**：由「今日课程三列列表」改为「当前 / 下一节课**焦点卡**」—— 标题行（`今日课程` + 周次副标题）→ 标签行（`当前课程` / `下一节课` / `全天课程结束`，**强调色** + 右侧 `剩余 N 分钟`）→ **课程名大字（16sp 粗体，视觉焦点）** → 教室行 → 下一节行。结构与文案逐条对齐 `harmonyos_port` 的 `TodayCourseCard.ets` | F-10 | Android 11+ |
+| UI | **配色采用项目既有视觉语言**（取自 `docs/notification-mockup.html`）：亮色 主文字 `#111111` / 次要 `#8A8A92`，暗色 主文字 `#FFFFFF` / 次要 `#9E9E9E`，强调蓝 `#3482FF` 深浅共用。字号梯度 12.5 / 11 / **16** / 11 / 11 sp，与鸿蒙版 13 / 11 / 20 的层次同构（按 4×2 高度等比压缩）。根改为 `gravity="center_vertical"`；空字段按 `GONE` 塌陷（对齐鸿蒙版 `if (x.length > 0)` 写法），内容整块垂直居中 | F-10 | Android 11+ |
+| 平台 | **圆环倒计时降级为文本**：鸿蒙版用 `Progress(ProgressType.Ring)` 36×36 圆环 + 中心剩余分钟数；Android RemoteViews 无法绘制环形进度，故降级为标签行右侧的等义文本「剩余 N 分钟」 | F-10 | Android 11+ |
+| 数据 | **载荷契约 v1 → v2**：`WidgetSnapshot` 改为焦点卡字段（`weekText` / `curTag` / `curName` / `curRoom` / `nextLine` / `remainText`），计算口径（周次过滤、进行中与下一节判定、全部文案）**逐条移植鸿蒙版 `lib/core/cards/course_card_sync.dart`**，两端卡片判定与文案完全一致 | S-26 | Android 11+ |
+| 说明 | **尺寸声明一字未动**：`minWidth=250dp` / `minHeight=110dp` / `minResizeWidth` / `minResizeHeight` / `targetCellWidth=4` / `targetCellHeight=2` / `updatePeriodMillis=1800000` 全部保持原值（`widget_today_courses_info.xml` 无 diff）。同时**移除裸 `<View>` 元素**（改用纯 TextView 布局，`<View` 计数为 0），并去除全部 `@string` 引用，进一步降低 launcher inflate 风险 | F-10 | Android 11+ |
+| 测试 | `test/widget_snapshot_test.dart` 按 v2 契约重写：空态 / 上课中 / 课前 / 全天结束**四态文案**、单双周与指定周过滤、节次时间缺失跳过、教室空值、JSON 载荷字段、`Course.periodLabel` 回归 | — | — |
+
+### 涉及编号变更
+- 版本：`1.51.0+161` → `1.51.1+162`（桌面卡片结构对齐鸿蒙版；尺寸声明未变）。
+
 ## v1.51.0（2026-09-10）[Android]
 
 ### 变更清单

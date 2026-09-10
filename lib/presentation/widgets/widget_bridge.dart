@@ -114,7 +114,7 @@ class _WidgetBridgeState extends ConsumerState<WidgetBridge> {
       final WidgetSnapshot snapshot = buildTodaySnapshot(
         courses: courses,
         periods: ref.read(appSettingsProvider).classPeriods,
-        effectiveWeek: meta?.effectiveWeek(now) ?? 1,
+        meta: meta ?? const ScheduleMeta(),
         now: now,
         isDark: Theme.of(context).brightness == Brightness.dark,
       );

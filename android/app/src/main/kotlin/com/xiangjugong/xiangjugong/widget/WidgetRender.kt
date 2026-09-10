@@ -1,12 +1,14 @@
 // === 文件: android/app/src/main/kotlin/com/xiangjugong/xiangjugong/widget/WidgetRender.kt ===
-// 编号：S-26 内部件 · 卡片渲染（v1.51.0）
-// 说明：把 Flutter 下发的快照渲染成 RemoteViews。三条兼容红线：
+// 编号：S-26 内部件 · 卡片渲染（v1.51.1 焦点卡）
+// 说明：把 Flutter 下发的焦点卡快照渲染成 RemoteViews。四条兼容红线：
 //   1. 只用 @RemotableViewMethod 白名单内的操作（setTextViewText /
 //      setTextColor / setViewVisibility / setOnClickPendingIntent）；
-//      **不使用** setBackgroundResource —— 它不是 remotable 方法，
-//      反射调用会被 RemoteViews 校验拒绝并抛 ActionException。
+//      **不使用** setBackgroundResource（非 remotable，反射调用会被
+//      RemoteViews 校验拒绝），本次也不再使用 setBackgroundColor；
 //   2. 亮/暗两套底色改为「选布局资源」，不做主题引用解析；
-//   3. 不做任何 Bitmap / Canvas 绘制，不引入 Adapter 或集合小组件。
+//   3. 不做任何 Bitmap / Canvas 绘制，不引入 Adapter 或集合小组件；
+//   4. 空字段用 GONE 塌陷（对齐鸿蒙版 `if (x.length > 0)` 的写法），
+//      整块内容靠根的 gravity=center_vertical 居中，不留固定空行。
 package com.xiangjugong.xiangjugong.widget
 
 import android.app.PendingIntent
@@ -14,10 +16,10 @@ import android.content.Context
 import android.content.Intent
 import android.view.View
 import android.widget.RemoteViews
-import java.util.Calendar
-import java.util.Locale
 import com.xiangjugong.xiangjugong.MainActivity
 import com.xiangjugong.xiangjugong.R
+import java.util.Calendar
+import java.util.Locale
 
 internal object WidgetRender {
     /** 点击卡片随 Intent 带给 MainActivity 的目标路由 extra 键。 */
@@ -26,116 +28,85 @@ internal object WidgetRender {
     /** 点击卡片跳转目标（R-10 课表页；见 app_router.dart 的 /timetable）。 */
     private const val ROUTE_TIMETABLE = "/timetable"
 
-    /** 卡面固定行数（与布局中预置的行容器数一致）。 */
-    private const val MAX_ROWS = 3
-
     /** PendingIntent requestCode（固定：同一张卡只保留一个点击目标）。 */
     private const val REQUEST_CODE_CLICK = 1001
 
-    private const val LIGHT_TEXT = 0xFF1A1A1A.toInt()
-    private const val LIGHT_DIM = 0x99000000.toInt()
-    private const val DARK_TEXT = 0xFFE8E8E8.toInt()
-    private const val DARK_DIM = 0x99FFFFFF.toInt()
+    // 配色取自 docs/notification-mockup.html 的视觉语言（与 Miuix 主题一致）。
+    private const val LIGHT_PRIMARY = 0xFF111111.toInt()
+    private const val LIGHT_SECONDARY = 0xFF8A8A92.toInt()
+    private const val DARK_PRIMARY = 0xFFFFFFFF.toInt()
+    private const val DARK_SECONDARY = 0xFF9E9E9E.toInt()
 
-    /** 一行的四个 view id（容器 + 三列）。 */
-    private class RowIds(
-        val container: Int,
-        val name: Int,
-        val time: Int,
-        val room: Int,
-    )
-
-    private val ROWS: Array<RowIds> = arrayOf(
-        RowIds(R.id.widget_row1, R.id.widget_name1, R.id.widget_time1, R.id.widget_room1),
-        RowIds(R.id.widget_row2, R.id.widget_name2, R.id.widget_time2, R.id.widget_room2),
-        RowIds(R.id.widget_row3, R.id.widget_name3, R.id.widget_time3, R.id.widget_room3),
-    )
+    /** 强调色（Miuix / HyperOS 强调蓝；深浅色共用）。 */
+    private const val ACCENT = 0xFF3482FF.toInt()
 
     /**
-     * 渲染卡片。快照为 null（从未写入 / 解析失败 / 版本不兼容）按「今日无课」处理 ——
-     * 卡片永远有内容可画，不会出现系统级的空白 provider。
+     * 渲染卡片。快照为 null（从未写入 / 解析失败 / 版本不兼容）或已跨天时
+     * 按「暂无课程」渲染 —— 卡片永远有内容可画，不会出现空白 provider。
      */
     fun build(context: Context, snapshot: Snapshot?): RemoteViews {
         val dark = snapshot?.isDark == true
         val views = RemoteViews(
             context.packageName,
-            // 亮暗切换通过「选布局」实现：两份布局仅底色 drawable 不同。
+            // 亮暗切换通过「选布局」实现：两份布局仅底色 drawable 与默认文字色不同。
             if (dark) R.layout.widget_today_courses_dark else R.layout.widget_today_courses,
         )
 
-        val textColor = if (dark) DARK_TEXT else LIGHT_TEXT
-        val dimColor = if (dark) DARK_DIM else LIGHT_DIM
-        val now = nowMinutes()
+        val primary = if (dark) DARK_PRIMARY else LIGHT_PRIMARY
+        val secondary = if (dark) DARK_SECONDARY else LIGHT_SECONDARY
 
-        // 标题：今日课程 · 周三
-        val dayLabel = snapshot?.dayLabel.orEmpty()
-        views.setTextViewText(
-            R.id.widget_title,
-            if (dayLabel.isEmpty()) "今日课程" else "今日课程 · $dayLabel",
-        )
-        views.setTextColor(R.id.widget_title, textColor)
-        views.setTextColor(R.id.widget_count, dimColor)
-        views.setTextColor(R.id.widget_more, dimColor)
-        views.setTextColor(R.id.widget_empty, dimColor)
-
-        val rows = snapshot?.courses.orEmpty()
         // 跨天兜底：Flutter 尚未写入今天的数据时，绝不把昨天的课当成今天显示。
-        val total = if (snapshot != null && isStale(snapshot)) 0 else snapshot?.total ?: 0
+        val s = if (snapshot != null && !isStale(snapshot)) snapshot else null
 
-        if (total <= 0 || rows.isEmpty()) {
-            views.setTextViewText(R.id.widget_count, "")
-            views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
-            views.setViewVisibility(R.id.widget_more, View.GONE)
-            for (ids in ROWS) views.setViewVisibility(ids.container, View.GONE)
-            applyClick(context, views)
-            return views
-        }
+        // ── 固定配色（每帧都要下发；不依赖布局里的默认值）──
+        views.setTextColor(R.id.widget_title, primary)
+        views.setTextColor(R.id.widget_week, secondary)
+        views.setTextColor(R.id.widget_tag, ACCENT)
+        views.setTextColor(R.id.widget_remain, secondary)
+        views.setTextColor(R.id.widget_name, primary)
+        views.setTextColor(R.id.widget_room, secondary)
+        views.setTextColor(R.id.widget_next, secondary)
 
-        views.setTextViewText(R.id.widget_count, "共 $total 门")
-        views.setViewVisibility(R.id.widget_empty, View.GONE)
+        // ── 标题行：周次副标题（空则塌陷）──
+        val weekText = s?.weekText.orEmpty()
+        views.setTextViewText(R.id.widget_week, weekText)
+        views.setViewVisibility(
+            R.id.widget_week,
+            if (weekText.isEmpty()) View.GONE else View.VISIBLE,
+        )
 
-        for (i in ROWS.indices) {
-            val ids = ROWS[i]
-            val row = rows.getOrNull(i)
-            if (row == null) {
-                views.setViewVisibility(ids.container, View.GONE)
-                continue
-            }
-            views.setViewVisibility(ids.container, View.VISIBLE)
-            views.setTextViewText(ids.name, row.name)
-            views.setTextViewText(ids.time, row.time)
-            // 课室可为空（字段选填）：空串即留白，不写占位符。
-            views.setTextViewText(ids.room, row.room)
-            // 进行中的课程用课程自身的颜色着色。
-            // 状态在渲染时**按当前墙钟重算**：课程闹钟 / 30 分钟周期刷新时 App
-            // 可能并未运行，快照里写入时刻的 state 早已过期；节次时间缺失
-            // （<0）才回落到 Flutter 侧的判定。
-            val ongoing = stateOf(row, now) == WidgetSnapshotParser.STATE_ONGOING
-            views.setTextColor(ids.name, if (ongoing) row.color else textColor)
-            views.setTextColor(ids.time, dimColor)
-            views.setTextColor(ids.room, dimColor)
-        }
+        // ── 标签行：当前课程 / 下一节课（强调色）+ 右侧剩余分钟 ──
+        val tag = s?.curTag.orEmpty()
+        views.setTextViewText(R.id.widget_tag, tag)
+        views.setViewVisibility(
+            R.id.widget_tag,
+            if (tag.isEmpty()) View.GONE else View.VISIBLE,
+        )
+        val remain = s?.remainText.orEmpty()
+        views.setTextViewText(R.id.widget_remain, remain)
+        views.setViewVisibility(
+            R.id.widget_remain,
+            if (remain.isEmpty()) View.GONE else View.VISIBLE,
+        )
 
-        val overflow = total - MAX_ROWS
-        if (overflow > 0) {
-            views.setViewVisibility(R.id.widget_more, View.VISIBLE)
-            views.setTextViewText(R.id.widget_more, "… 等 $overflow 门")
-        } else {
-            views.setViewVisibility(R.id.widget_more, View.GONE)
-        }
+        // ── 课程名（大字焦点）；无数据时给「暂无课程」──
+        val name = s?.curName.orEmpty().ifEmpty { "暂无课程" }
+        views.setTextViewText(R.id.widget_name, name)
+
+        // ── 教室行（选填，空则塌陷）──
+        val room = s?.curRoom.orEmpty()
+        views.setTextViewText(R.id.widget_room, room)
+        views.setViewVisibility(
+            R.id.widget_room,
+            if (room.isEmpty()) View.GONE else View.VISIBLE,
+        )
+
+        // ── 下一节行（无数据时提示去添加）──
+        val nextLine = if (s == null) "点击卡片去添加" else s.nextLine
+        views.setTextViewText(R.id.widget_next, nextLine)
 
         applyClick(context, views)
         return views
-    }
-
-    /** 按当前墙钟重算某行状态；节次时间缺失时沿用 Flutter 侧写入的判定。 */
-    private fun stateOf(row: CourseRow, now: Int): String {
-        if (row.startMinutes < 0 || row.endMinutes <= row.startMinutes) return row.state
-        return when {
-            now >= row.endMinutes -> WidgetSnapshotParser.STATE_PAST
-            now >= row.startMinutes -> WidgetSnapshotParser.STATE_ONGOING
-            else -> WidgetSnapshotParser.STATE_UPCOMING
-        }
     }
 
     /** 快照的日期键是否为「非今天」（跨天未写入 / 系统时钟回拨）。 */
@@ -150,12 +121,6 @@ internal object WidgetRender {
             c.get(Calendar.DAY_OF_MONTH),
         )
         return snapshot.dateKey != today
-    }
-
-    /** 当日 0 点起分钟数。 */
-    private fun nowMinutes(): Int {
-        val c = Calendar.getInstance()
-        return c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
     }
 
     /**

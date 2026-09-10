@@ -5,6 +5,7 @@
 > 唯一验证目标：**红米 K90（2510DRK44C）· HyperOS 4.0 · Android 17（SDK 37）**
 > 前置版本：v1.50.3+159
 > 关联编号：**S-26**（数据桥）/ **F-10**（功能模块）/ R-10（课表路由）
+> **v1.51.1 修订**：卡面由「今日课程三列列表」改为「当前 / 下一节课**焦点卡**」，结构、文案、配色逐条对齐鸿蒙版服务卡片（`harmonyos_port` 的 `TodayCourseCard.ets` 与 `lib/core/cards/course_card_sync.dart`）。**尺寸声明一字未动**（仍是 250×110dp / 4×2）。
 > **华为 / HarmonyOS 不在本规划内**（走 FormKit，另行规划）
 
 ---
@@ -40,27 +41,25 @@ WorkManager 周期刷新 · Jetpack Glance · U-06 厂商适配层 · P-21 管�
 
 ```
 ┌──────────────────────────────────────────────────┐
-│ 今日课程 · 周三                            4 门   │  ← 标题行
-│ ──────────────────────────────────────────────── │
-│ 高等数学         08:00-09:40        A-301        │  ← 进行中（课程色 + 加粗）
-│ 大学英语         10:00-11:40        B-202        │
-│ 数据结构         14:00-15:40        C-105        │
-│ … 等 1 门                                        │
+│ 今日课程                       第 12 周 · 第 1 学期│  ← 标题行 12.5sp / 11sp
+│ 当前课程                           剩余 40 分钟   │  ← 标签行 11sp 强调蓝 / 11sp 次要
+│ 高等数学                                          │  ← 课程名 16sp 粗体（视觉焦点）
+│ 教室:A-301                                        │  ← 教室 11sp 次要
+│ 下一节课是:大学英语 09:50                         │  ← 下一节 11sp 次要
 └──────────────────────────────────────────────────┘
 ```
 
 | 项 | 值 |
 |:---|:---|
-| 尺寸 | `minWidth=250dp` / `minHeight=110dp` = **4×2** |
+| 尺寸 | `minWidth=250dp` / `minHeight=110dp` / `minResizeWidth=250dp` / `minResizeHeight=110dp`；`targetCellWidth=4` / `targetCellHeight=2` = **4×2**（**v1.51.1 起尺寸声明一字未动**） |
 | 依据 | HyperOS 4 实测：`70n-30` 公式成立（n=4→250，n=2→110），Gmail / Chrome / Telegram / WakeUp 均用此值 |
-| 行数 | **固定 3 行**（静态 XML 预置，`setViewVisibility` 控制显隐） |
-| 列 | 课程名（左，超长省略号）· 时间（中）· 课室（右） |
-| 溢出 | 标题右侧显示总门数；第 3 行下方显示「… 等 N 门」 |
-| 空态 | `total == 0` → 标题「今日课程 · 周三」+ 居中「今日无课」 |
-| 课室为空 | `location` 为可选字段，空则留空不占位 |
-| 节次未启用 | 时间列退化为节次文本「第1-2节」 |
+| 结构 | **焦点卡**（v1.51.1 起，对齐鸿蒙版 `TodayCourseCard.ets`）：标题行 → 标签行 → 课程名大字 → 教室行 → 下一节行；**已不再是三列列表** |
+| 标签三态 | `当前课程` / `下一节课` / `全天课程结束`（强调蓝 `#3482FF`）；无课表时标签行隐藏 |
+| 大字 | 课程名 16sp 粗体；无课表 → `暂无课程`，全天结束 → `休息中` |
+| 倒计时 | 上课中在标签行右侧显示「剩余 N 分钟」（鸿蒙版是 36×36 圆环 + 数字，RemoteViews 画不出环形进度，降级为等义文本） |
+| 空字段 | 周次 / 标签 / 剩余 / 教室为空时 `GONE` 塌陷（对齐鸿蒙版 `if (x.length > 0)` 写法），内容靠根 `gravity="center_vertical"` 整块居中 |
 | 点击 | 整卡 → `/timetable`（R-10） |
-| 高亮 | 进行中课程：课程名用 `Course.colorValue` 着色（其余行常规色） |
+| 配色 | 亮 `#111111` / `#8A8A92`、暗 `#FFFFFF` / `#9E9E9E`、强调 `#3482FF`（取自 `docs/notification-mockup.html`） |
 
 ---
 
@@ -81,36 +80,34 @@ WorkManager 周期刷新 · Jetpack Glance · U-06 厂商适配层 · P-21 管�
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "updatedAt": 1789000000000,
   "dateKey": "2026-09-10",
-  "dayLabel": "周三",
-  "total": 4,
-  "isDark": false,
-  "courses": [
-    {
-      "name": "高等数学",
-      "time": "08:00-09:40",
-      "room": "A-301",
-      "state": "ongoing",
-      "color": 4285098346
-    }
-  ]
+  "weekText": "第 12 周 · 第 1 学期",
+  "curTag": "当前课程",
+  "curName": "高等数学",
+  "curRoom": "教室:A-301",
+  "nextLine": "下一节课是:大学英语 09:50",
+  "remainText": "剩余 40 分钟",
+  "isDark": false
 }
 ```
 
 | 字段 | 说明 |
 |:---|:---|
-| `v` | 格式版本，原生据此判兼容 |
+| `v` | 格式版本（**v2 = 焦点卡契约**；v1 为已废弃的三列列表契约），原生据此判兼容 |
 | `updatedAt` | 写入时间戳（诊断用） |
-| `dateKey` | `yyyy-MM-dd`；原生比对当前日期，**不一致视为过期**（跨天兜底） |
-| `dayLabel` | 标题用，如「周三」 |
-| `total` | 今日课程总数（含未展示的） |
-| `isDark` | 亮暗模式 → 原生切换 `widget_bg_light` / `widget_bg_dark` |
-| `courses[].state` | `ongoing` / `upcoming` / `past`（Flutter 侧算好） |
-| `courses[].color` | `Course.colorValue`（ARGB int），仅 `ongoing` 使用 |
+| `dateKey` | `yyyy-MM-dd`；原生比对当前日期，**不一致视为过期**（跨天兜底 → 按空态渲染） |
+| `weekText` | 标题行副标题，如 `第 12 周 · 第 1 学期`（与鸿蒙版同文案） |
+| `curTag` | 标签三态：`当前课程` / `下一节课` / `全天课程结束`；空串 = 隐藏标签行 |
+| `curName` | 课程名（大字焦点）；无课表时 `暂无课程`、全天结束时 `休息中` |
+| `curRoom` | `教室:xxx`；无教室信息 → 空串（原生隐藏该行） |
+| `nextLine` | 末行提示：`下一节课是:…` / `再下一节:…` / `今天没有更多课了` / `明天也要好好上课 ✨` / `点击卡片去添加` |
+| `remainText` | `剩余 N 分钟`，仅上课中出现；空串 = 隐藏 |
+| `isDark` | 亮暗模式 → 原生据此选择 `widget_today_courses` / `_dark` 布局 |
 
-**存储**：SharedPreferences 文件名 `widget_store`，键 `widget.todayCourses`（v1 仅此一个键）。
+**存储**：SharedPreferences 文件名 `widget_store`，键 `widget.todayCourses`（仅此一个键）。
+**计算口径**：逐条移植鸿蒙版 `lib/core/cards/course_card_sync.dart`（周次过滤 / 进行中与下一节判定 / 全部文案），使两端卡片判定与文案完全一致。
 
 ---
 

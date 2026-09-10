@@ -2,13 +2,27 @@
 <!--
   F-10 今日课程卡（4x2）· 暗色版。
 
-  为什么要两份布局而不是运行时换背景：
-    亮/暗两套底色各自是**静态 drawable**，渲染时按 isDark 直接选布局资源。
-    这样运行时完全不需要 setBackgroundResource / 主题引用（前者不是
-    @RemotableViewMethod，反射调用会被 RemoteViews 校验拒绝；后者正是
-    v1.36.0 桌面渲染异常的根因之一）。
-  结构与 widget_today_courses.xml 严格同构，仅 background 与默认文字色不同
-  （文字色运行时仍会被 setTextColor 覆盖，此处仅是预览兜底）。
+  v1.51.1 结构对齐鸿蒙版服务卡片（harmonyos_port 的 TodayCourseCard.ets）：
+  由「今日课程三列列表」改为「当前 / 下一节课焦点卡」——
+    标题行（今日课程 + 周次）
+    → 标签行（当前课程 / 下一节课，强调色 + 右侧剩余分钟）
+    → 课程名（大字视觉焦点）
+    → 教室行
+    → 下一节行
+  **尺寸声明一律未动**（minWidth/minHeight/minResize*/targetCell* 仍是
+  250x110dp / 4x2，见 widget_today_courses_info.xml）。
+
+  兼容性红线（v1.36.0 桌面小组件失败的复盘结论，务必保持）：
+    1. ViewGroup 嵌套 ≤ 2 层：根 LinearLayout + 两个行 LinearLayout；
+    2. 无 Bitmap、无 Canvas、无自定义绘制元素，**不使用裸 <View>**；
+    3. 布局内颜色全部是**字面量**，不使用 ?attr/ 或 @color/ 主题引用；
+       运行时变化仅限文字（setTextColor）与显隐（setViewVisibility）；
+    4. 不使用 RemoteViewsService / ListView 集合小组件。
+  配色取自项目 docs/notification-mockup.html 的视觉语言（主文字 / 次要 / 强调
+  三档；亮暗两套具体色值见各 TextView 的 android:textColor 字面量，
+  强调色 #FF3482FF 深浅色共用）。
+  圆环倒计时：鸿蒙版为 Progress(Ring)，RemoteViews 画不出环形，
+  故降级为等义文本（标签行右侧「剩余 N 分钟」）。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -16,12 +30,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg_dark"
+    android:gravity="center_vertical"
     android:orientation="vertical"
-    android:paddingStart="14dp"
+    android:paddingStart="12dp"
     android:paddingTop="11dp"
-    android:paddingEnd="14dp"
+    android:paddingEnd="12dp"
     android:paddingBottom="11dp">
 
+    <!-- ── 标题行：今日课程                    第 12 周 · 第 1 学期 ── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -35,170 +51,85 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#FFF2F2F2"
-            android:textSize="12sp"
+            android:text="今日课程"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12.5sp"
             android:textStyle="bold"
-            tools:text="今日课程 · 周三" />
+            tools:text="今日课程" />
 
         <TextView
-            android:id="@+id/widget_count"
+            android:id="@+id/widget_week"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
+            android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#99FFFFFF"
+            android:textColor="#FF9E9E9E"
             android:textSize="11sp"
-            tools:text="共 4 门" />
+            tools:text="第 12 周 · 第 1 学期" />
     </LinearLayout>
 
+    <!-- ── 标签行：当前课程                    剩余 40 分钟 ────────── -->
     <LinearLayout
-        android:id="@+id/widget_row1"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="wrap_content"
         android:baselineAligned="false"
-        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
-            android:id="@+id/widget_name1"
+            android:id="@+id/widget_tag"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#FFE8E8E8"
+            android:textColor="#FF3482FF"
             android:textSize="11sp"
-            tools:text="高等数学" />
+            tools:text="当前课程" />
 
         <TextView
-            android:id="@+id/widget_time1"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:maxLines="1"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="08:00-09:40" />
-
-        <TextView
-            android:id="@+id/widget_room1"
+            android:id="@+id/widget_remain"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:maxWidth="76dp"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="A-301" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/widget_row2"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:baselineAligned="false"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/widget_name2"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#FFE8E8E8"
+            android:textColor="#FF9E9E9E"
             android:textSize="11sp"
-            tools:text="大学英语" />
-
-        <TextView
-            android:id="@+id/widget_time2"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:maxLines="1"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="10:00-11:40" />
-
-        <TextView
-            android:id="@+id/widget_room2"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:maxWidth="76dp"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="B-202" />
+            tools:text="剩余 40 分钟" />
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/widget_row3"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:baselineAligned="false"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/widget_name3"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#FFE8E8E8"
-            android:textSize="11sp"
-            tools:text="数据结构" />
-
-        <TextView
-            android:id="@+id/widget_time3"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:maxLines="1"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="14:00-15:40" />
-
-        <TextView
-            android:id="@+id/widget_room3"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:maxWidth="76dp"
-            android:textColor="#99FFFFFF"
-            android:textSize="10sp"
-            tools:text="C-105" />
-    </LinearLayout>
-
+    <!-- ── 课程名（大字视觉焦点）────────────────────────────────── -->
     <TextView
-        android:id="@+id/widget_more"
+        android:id="@+id/widget_name"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="#99FFFFFF"
-        android:textSize="10sp"
-        tools:text="… 等 2 门" />
+        android:textColor="#FFFFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        tools:text="高等数学" />
 
+    <!-- ── 教室行 ──────────────────────────────────────────────── -->
     <TextView
-        android:id="@+id/widget_empty"
+        android:id="@+id/widget_room"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:gravity="center"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
         android:maxLines="1"
-        android:text="今日无课"
-        android:textColor="#99FFFFFF"
-        android:textSize="12sp"
-        android:visibility="gone" />
+        android:textColor="#FF9E9E9E"
+        android:textSize="11sp"
+        tools:text="教室:A-301" />
+
+    <!-- ── 下一节行 ────────────────────────────────────────────── -->
+    <TextView
+        android:id="@+id/widget_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#FF9E9E9E"
+        android:textSize="11sp"
+        tools:text="下一节课是:大学英语 09:50" />
 </LinearLayout>
