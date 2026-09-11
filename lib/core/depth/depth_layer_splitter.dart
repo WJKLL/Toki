@@ -84,8 +84,10 @@ abstract final class DepthLayerSplitter {
     int maxSide = 1440,
     // ★ 暂不使用 margin：加 margin 需要走 Picture.toImage + 边缘复制，
     //   而"位移=0 时离线合成正常、App 却发白"的差异只可能来自这条路径。
-    //   现在层图尺寸 = 工作尺寸，渲染改用 translate + drawImage（不再用 srcRect
-    //   取窗）。代价：位移时画面边缘会露空 —— 先排除变量，确认白光消失后再补回。
+    //   现在层图尺寸 = 工作尺寸。
+    //   ⚠️ 由此带来的"位移时画面边缘会露空"已在渲染侧解决：layer_compose.frag
+    //   用 uZoom 把采样范围收窄到 [c, 1-c]，等效于给每层补回了 margin（详见该
+    //   文件顶部说明）。所以这里可以继续保持 margin = 0，不必再走 Picture 路径。
     int margin = 0,
   }) async {
     if (layerCount < 2) layerCount = 2;
@@ -113,44 +115,78 @@ abstract final class DepthLayerSplitter {
         ? _otsuSplit(dw, 64).clamp(0.12, 0.88)
         : 0.5;
 
+    // ── 层下界（alpha 与"归属"都用它）──────────────────────────
+    final List<double> los = <double>[];
+    for (int i = 0; i < layerCount; i++) {
+      los.add(layerCount == 2 ? (i == 0 ? 0.0 : split) : i / layerCount);
+    }
+
+    // ★ alpha 必须【累积】，不能互补 —— 这是"移动错位时露出底部白色"的根因。
+    //
+    //   互补设计（各层 alpha 之和 = 1）：静止时合成结果正确，但**平移会破坏
+    //   互补关系** —— 边界处两层各自移开，位置 P 上两层的 alpha 都可能变成 0，
+    //   于是没有任何层覆盖它，直接露出页面底色（浅色）→ 白缝。
+    //
+    //   累积设计（画家算法）：最远层 alpha 恒为 1，整幅铺满作底；更近的层只
+    //   负责"向上叠加"，覆盖从自己下界直到最近的全部区域。这样任何层移开后
+    //   留下的空隙，都仍有更远层在铺底，永远不露白。
+    double alphaAt(int i, double d) =>
+        i == 0 ? 1.0 : _smoothstep(los[i] - feather, los[i] + feather, d);
+
+    // ★ 但 RGB 不能跟着 alpha 走，必须按【归属 own】混合 —— 这是"露出底图主体"的根因。
+    //
+    //   alpha 回答"覆盖到什么程度"（累积），own 回答"这块像素是不是这层自己的"。
+    //   两者的差别恰好落在最远层：它 alpha 恒为 1（必须铺底），若 RGB 直接用整张
+    //   原图，那层里就【含着清晰的主体】—— 主体层不动、背景层移开时，主体轮廓
+    //   外侧会露出"另一个清晰的主体"（实测："会露出底图主体"）。
+    //
+    //   归属 = 本层 alpha − 下一层 alpha（最后一层就是它自己的 alpha）：
+    //     背景区：a0=1、a1=0 → 层0 own=1（原图）、层1 own=0（模糊版）
+    //     主体区：a0=1、a1=1 → 层0 own=0（模糊版）、层1 own=1（原图）
+    //   于是层 0 在主体位置存的是【模糊版】，移开后只会露出柔和色块。
+    //
+    //   深度分箱查找表：避免每像素重复算 smoothstep（顺带比原实现更快）。
+    const int bins = 1024;
+    final List<Float32List> lut = <Float32List>[];
+    for (int i = 0; i < layerCount; i++) {
+      final Float32List t = Float32List(bins);
+      for (int b = 0; b < bins; b++) {
+        t[b] = alphaAt(i, b / (bins - 1));
+      }
+      lut.add(t);
+    }
+
     final List<DepthLayer> layers = <DepthLayer>[];
     for (int i = 0; i < layerCount; i++) {
-      final double lo;
-      final double hi;
-      if (layerCount == 2) {
-        lo = i == 0 ? 0.0 : split;
-        hi = i == 0 ? split : 1.0;
-      } else {
-        lo = i / layerCount;
-        hi = (i + 1) / layerCount;
-      }
-      // ★ alpha 必须【累积】，不能互补 —— 这是"移动错位时露出底部白色"的根因。
-      //
-      //   互补设计（各层 alpha 之和 = 1）：静止时合成结果正确，但**平移会破坏
-      //   互补关系** —— 边界处两层各自移开，位置 P 上两层的 alpha 都可能变成 0，
-      //   于是没有任何层覆盖它，直接露出页面底色（浅色）→ 白缝。
-      //
-      //   累积设计（画家算法）：最远层 alpha 恒为 1，整幅铺满作底；更近的层只
-      //   负责"向上叠加"，覆盖从自己下界直到最近的全部区域。这样任何层移开后
-      //   留下的空隙，都仍有更远层在铺底，永远不露白。
-      final bool first = i == 0;
+      final double lo = los[i];
+      final double hi = layerCount == 2
+          ? (i == 0 ? split : 1.0)
+          : (i + 1) / layerCount;
+
+      final Float32List aOf = lut[i];
+      final Float32List? aNext = i + 1 < layerCount ? lut[i + 1] : null;
 
       final Uint8List rgba = Uint8List(w * h * 4);
       bool any = false;
       for (int p = 0; p < w * h; p++) {
-        final double d = dw[p];
-        final double a = first
-            ? 1.0
-            : _smoothstep(lo - feather, lo + feather, d);
+        final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
+        final double a = aOf[bi];
+        if (a <= 0.0) continue; // 本层不覆盖这里 → 留全透明，合成时无影响
+        // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
+        final double own = aNext == null
+            ? a
+            : (a - aNext[bi]).clamp(0.0, 1.0);
         final int o = p * 4;
         // 本层区域用原图，其余用模糊版：避免平移后露出错位的其它层内容。
-        rgba[o] = (src[o] * a + soft[o] * (1.0 - a)).round().clamp(0, 255);
-        rgba[o + 1] =
-            (src[o + 1] * a + soft[o + 1] * (1.0 - a)).round().clamp(0, 255);
-        rgba[o + 2] =
-            (src[o + 2] * a + soft[o + 2] * (1.0 - a)).round().clamp(0, 255);
+        rgba[o] = (src[o] * own + soft[o] * (1.0 - own)).round().clamp(0, 255);
+        rgba[o + 1] = (src[o + 1] * own + soft[o + 1] * (1.0 - own))
+            .round()
+            .clamp(0, 255);
+        rgba[o + 2] = (src[o + 2] * own + soft[o + 2] * (1.0 - own))
+            .round()
+            .clamp(0, 255);
         rgba[o + 3] = (a * 255.0).round().clamp(0, 255);
-        if (a > 0.01) any = true;
+        any = true;
       }
       if (!any) continue; // 该层没有像素（深度分布集中时的空层）
 

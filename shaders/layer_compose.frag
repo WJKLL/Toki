@@ -60,8 +60,10 @@ out vec4 fragColor;
 void main() {
     vec2 uv = FlutterFragCoord().xy / uSize;
 
-    // 视野放大：把 [0,1] 的采样范围收紧到 [c, 1-c]，给每层等效补上 margin。
-    vec2 uvz = (uv - 0.5) * uZoom + 0.5;
+    // 视野放大：把 [0,1] 的采样范围【收窄】到 [c, 1-c]，给每层等效补上 margin。
+    // ⚠️ 必须是【除以】uZoom：乘以 uZoom 会把采样范围扩到 [0,1] 之外，
+    //    越界后被 clamp 拉边 → 整张图四周出现拉伸糊边（实测反馈）。
+    vec2 uvz = (uv - 0.5) / uZoom + 0.5;
 
     vec4 acc = vec4(0.0, 0.0, 0.0, 0.0);
 
