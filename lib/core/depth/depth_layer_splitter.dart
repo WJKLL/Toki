@@ -163,15 +163,18 @@ abstract final class DepthLayerSplitter {
         subj = SubjectMask(
           width: sw,
           height: sh,
-          data: _keepConnected(
-            subj.data,
+          data: _depthFloor(
+            // ① 连通性：剔掉与人体之间有"深度台阶"的误判块，保住手指/手臂
+            _keepConnected(
+              subj.data,
+              lowDepth,
+              sw,
+              sh,
+              tol: 0.15,
+              seedMin: 0.75,
+            ),
+            // ② 深度下限：兜底剔掉"连通但明显偏远"的块（那片渐变背景在这里被清掉）
             lowDepth,
-            sw,
-            sh,
-            // 相邻深度容差：略宽松，手指与手掌之间本身也有深度跳变
-            tol: 0.15,
-            // 种子 = mask 核心区域（高置信度的那部分）
-            seedMin: 0.75,
           ),
         );
       }
@@ -382,34 +385,35 @@ abstract final class DepthLayerSplitter {
     return out;
   }
 
-  /// 把"mask 判为主体、但深度明显属于背景"的像素剔掉。
+  /// 按【深度下限】剔除明显属于背景的像素（与 [_keepConnected] 串联使用）。
   ///
-  /// 已被 [_keepConnected] 取代：全局阈值会误伤手指/手臂这类深度噪声大的
-  /// 边缘部位（实测："手指被分割了一点"）。保留备查。
+  /// ★ 为什么要和连通性串联（实测两轮）
+  ///   两个判据各有一个漏洞：
+  ///     · 全局阈值（中位数 − 0.18）：能剔掉误判背景块，但**误剔手指/手臂**
+  ///       —— 它们深度估计噪声大、容易越线；
+  ///     · 局部连通：能保住手指，但**保留那片渐变过渡的背景块**
+  ///       —— 它和腿之间是渐变的，BFS 走得通。
+  ///   于是串联：连通性先剔掉"断开"的，这里再兜底剔掉"连通但太远"的。
   ///
-  /// ★ 为什么需要（实测：主体层素材截图）
-  ///   主体层素材里，人物之外还含着一片实心不透明的背景（树荫/路面）——
-  ///   分割模型误判了一块。这类误判区域**几乎总是深度比人体远得多**，
-  ///   于是可以用深度一致性识别并剔除。
-  ///
-  /// ★ 注意这是【收缩】，不是早先失败过的"生长"
-  ///   生长只增不减、一旦蔓延无法回收（试了两版都失败）。这里只减不增：
-  ///   以 mask 核心区域（>0.75）的深度中位数为基准，明显更远的像素一律剔出。
-  ///   人体各部位（腿、手臂）与躯干深度接近，不会被误伤。
-  // ignore: unused_element
-  static Float32List _depthConsistency(
+  /// ★ 基准从【中位数】改成【低分位数】
+  ///   人体内部深度跨度本来就大（手最远、躯干最近），中位数会把手也划到线外。
+  ///   取 [quantile] 分位（默认 25%，即偏近的那一侧）再放宽 [margin]，
+  ///   手指/腿就都落在范围内，而背景块（远得多）仍会被剔除。
+  static Float32List _depthFloor(
     Float32List mask,
-    Float32List depth,
-  ) {
+    Float32List depth, {
+    double quantile = 0.25,
+    double margin = 0.12,
+  }) {
     final List<double> core = <double>[];
     for (int i = 0; i < mask.length; i++) {
-      if (mask[i] > 0.75) core.add(depth[i]);
+      // 用 0.5 而不是 0.75：把主体边缘也算进来，分位才代表整个人
+      if (mask[i] > 0.5) core.add(depth[i]);
     }
     if (core.length < 16) return mask;
     core.sort();
-    final double med = core[core.length ~/ 2];
-    // 比核心深度再远 0.18 个归一化单位以上 → 判定为背景误判。
-    final double floorDepth = med - 0.18;
+    final int qi = (core.length * quantile).floor().clamp(0, core.length - 1);
+    final double floorDepth = core[qi] - margin;
     final Float32List out = Float32List.fromList(mask);
     for (int i = 0; i < out.length; i++) {
       if (out[i] > 0.0 && depth[i] < floorDepth) out[i] = 0.0;
