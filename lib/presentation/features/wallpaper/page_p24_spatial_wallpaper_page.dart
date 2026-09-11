@@ -16,6 +16,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' show Material, MaterialType;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -90,6 +91,24 @@ class _PageP24SpatialWallpaperPageState
   ///   而这些在深度图预览里一个都看不到。把层图原样铺出来（棋盘格衬底），
   ///   才能在"渲染出错"时一眼分清是素材的问题还是合成的问题。
   int _showLayer = 0;
+
+  // ── 工具分页（参考系统相册编辑器）──────────────────────────
+  /// 当前选中的工具页：0 = 无（画面最大），1 = 主体，2 = 空间，
+  /// 3 = 焦点，4 = 组件，5 = 导出。
+  ///
+  /// ★ 为什么改成分页
+  ///   之前十几个滑块与开关全部平铺在一列里 —— 画面被挤到只剩四成屏高，
+  ///   而且调试开关和正式功能混在一起。分页后画面成为主角、参数按需出现。
+  int _toolTab = 0;
+
+  /// 调试面板展开态（顶部 ⋮）。
+  ///
+  /// 四个预览开关（深度图/遮罩/层素材）是开发工具，不该占主面板 ——
+  /// 收进这里，需要时展开、平时收起。
+  bool _debugOpen = false;
+
+  /// 画面截图锚点（保存到相册用）。
+  final GlobalKey _captureKey = GlobalKey();
 
   // ── U-14 手动修正（涂刷 / 擦除）────────────────────────────
   /// 手动修正层（分辨率与 AI mask 一致）。为空 = 还没进过涂刷模式。
@@ -688,47 +707,78 @@ class _PageP24SpatialWallpaperPageState
   // ── 视图 ────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    return MiuixScaffold(
-      contentWindowInsets: EdgeInsets.zero,
-      topBar: C25FrostedTopBar(
-        title: '空间壁纸',
-        largeTitle: '空间壁纸',
-        navigationIcon: _backButton,
-        actions: <Widget>[
-          C21CapsuleIconButton(
-            key: const ValueKey<String>('wallpaper.pickTop'),
-            icon: appIcon('image'),
-            tooltip: '导入图片',
-            onTap: () => unawaited(_pickPhoto()),
-          ),
-          const C26MoreMenu(),
-        ],
-        scrollBehavior: _collapse,
-      ),
-      content: (EdgeInsets padding) {
-        // 控制面板限高（≤42% 屏高）+ 可滚动 —— 关键：4 个滑块 + 2 个开关 +
-        // 按钮行的固有高度约 540dp，若直接放进 Column，Expanded 会被挤到 0，
-        // 表现为"预览画面被操控面板挡住 / 完全看不到"。
-        final double maxPanel = MediaQuery.sizeOf(context).height * 0.42;
-        return Material(
-          type: MaterialType.transparency,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              SizedBox(height: padding.top),
-              Expanded(child: _buildStage(colors)),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxPanel),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: _buildControls(colors),
+    // ★ 本页【强制深色】—— 参考系统相册编辑器的沉浸式编辑界面。
+    //   浅色主题下画面周围的大片留白会把整体观感带偏（判断视差效果时尤其明显）。
+    //   只包这一页，不影响 App 其它页面的主题。
+    return MiuixThemeController(
+      colorSchemeMode: MiuixColorSchemeMode.dark,
+      child: Builder(
+        builder: (BuildContext context) {
+          final MiuixColors colors = MiuixTheme.of(context).colors;
+          return MiuixScaffold(
+            contentWindowInsets: EdgeInsets.zero,
+            topBar: _buildTopBar(),
+            content: (EdgeInsets padding) {
+              // 参数区限高 30% 屏高并就地滚动；画面靠 Expanded 吃掉剩余空间 ——
+              // 相册编辑器的比例：画面是主角，参数只是配角。
+              final double maxPanel = MediaQuery.sizeOf(context).height * 0.30;
+              return Material(
+                type: MaterialType.transparency,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    SizedBox(height: padding.top),
+                    Expanded(child: _buildStage(colors)),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: maxPanel),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: _buildControls(colors),
+                      ),
+                    ),
+                    _buildToolBar(colors),
+                    SizedBox(height: padding.bottom),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  /// 顶部栏：返回 / 撤销 / 导入 / 保存 / 更多（对齐系统相册编辑器的动作集合）。
+  Widget _buildTopBar() {
+    return C25FrostedTopBar(
+      title: '空间壁纸',
+      largeTitle: '空间壁纸',
+      navigationIcon: _backButton,
+      actions: <Widget>[
+        C21CapsuleIconButton(
+          key: const ValueKey<String>('wallpaper.undo'),
+          icon: appIcon('undo'),
+          tooltip: '撤销',
+          // 无可撤销笔迹时置灰（onTap 为 null）
+          onTap: _undoStack.isEmpty ? null : _undoBrush,
+        ),
+        C21CapsuleIconButton(
+          key: const ValueKey<String>('wallpaper.pickTop'),
+          icon: appIcon('image'),
+          tooltip: '导入图片',
+          onTap: () => unawaited(_pickPhoto()),
+        ),
+        C21CapsuleIconButton(
+          key: const ValueKey<String>('wallpaper.save'),
+          icon: appIcon('download'),
+          tooltip: '保存到相册',
+          onTap: _photo == null || _busy
+              ? null
+              : () => unawaited(_saveToGallery()),
+        ),
+        const C26MoreMenu(),
+      ],
+      scrollBehavior: _collapse,
     );
   }
 
@@ -741,9 +791,13 @@ class _PageP24SpatialWallpaperPageState
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Center(
-        child: AspectRatio(
-          aspectRatio: photo.width / photo.height,
-          child: LayoutBuilder(
+        // ★ 截图锚点：保存到相册时对这个边界做 toImage ——
+        //   只框住画面本身，不含顶栏/参数区/工具行。
+        child: RepaintBoundary(
+          key: _captureKey,
+          child: AspectRatio(
+            aspectRatio: photo.width / photo.height,
+            child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c) {
               final Size size = c.biggest;
               // ★ 由【目标层间差】反推总位移：层间差 = 总位移×(1−ratio)/(层数−1)。
@@ -893,6 +947,7 @@ class _PageP24SpatialWallpaperPageState
             },
           ),
         ),
+        ),
       ),
     );
   }
@@ -925,73 +980,85 @@ class _PageP24SpatialWallpaperPageState
     );
   }
 
+  /// 参数区：按选中的工具页显示对应参数（参考系统相册编辑器的分页）。
+  ///
+  /// ★ 性能说明：这里只做"按条件构建 widget"，完全不碰渲染 —— 画面在
+  ///   Expanded 里、由 LayeredParallaxView 自己管 shouldRepaint，
+  ///   切换工具页不会触发它重建或重绘。
   Widget _buildControls(MiuixColors colors) {
     final bool hasImage = _photo != null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // ── 预设景深模板（B4：2~3 套 + 后续可手动修正）──
-          Row(
-            children: <Widget>[
-              for (int i = 0; i < DepthTemplate.presets.length; i++) ...<Widget>[
-                Expanded(
-                  child: MiuixButton(
-                    key: ValueKey<String>(
-                      'wallpaper.tpl.${DepthTemplate.presets[i].kind.name}',
+          // ══════════ 1 主体 ══════════
+          if (_toolTab == 1) ...<Widget>[
+            // ── 深度来源：几何模板（B4 降级链的最后一级）──
+            Row(
+              children: <Widget>[
+                for (int i = 0;
+                    i < DepthTemplate.presets.length;
+                    i++) ...<Widget>[
+                  Expanded(
+                    child: MiuixButton(
+                      key: ValueKey<String>(
+                        'wallpaper.tpl.${DepthTemplate.presets[i].kind.name}',
+                      ),
+                      onPressed: hasImage
+                          ? () => _applyTemplate(DepthTemplate.presets[i])
+                          : null,
+                      colors: DepthTemplate.presets[i].kind == _template.kind
+                          ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                          : null,
+                      child: Text(DepthTemplate.presets[i].label),
                     ),
-                    onPressed: hasImage
-                        ? () => _applyTemplate(DepthTemplate.presets[i])
-                        : null,
-                    colors: DepthTemplate.presets[i].kind == _template.kind
-                        ? MiuixButtonDefaults.buttonColorsPrimary(context)
-                        : null,
-                    child: Text(DepthTemplate.presets[i].label),
                   ),
-                ),
-                if (i != DepthTemplate.presets.length - 1)
-                  const SizedBox(width: 8),
+                  if (i != DepthTemplate.presets.length - 1)
+                    const SizedBox(width: 8),
+                ],
               ],
+            ),
+            const SizedBox(height: 6),
+            // ── S-31：端侧 AI 深度估计（真实场景层次）──
+            MiuixButton(
+              key: const ValueKey<String>('wallpaper.ai'),
+              onPressed: (!hasImage || _aiBusy) ? null : _runAiDepth,
+              colors: _aiDepth
+                  ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                  : null,
+              child: Text(
+                _aiBusy
+                    ? 'AI 推理中…'
+                    : (_aiDepth ? 'AI 深度（已启用）' : '用 AI 估计深度'),
+              ),
+            ),
+            if (_aiInfo.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 4),
+              MiuixText(
+                _aiInfo,
+                style: MiuixTheme.of(context).textStyles.body2,
+                color: colors.onSurfaceVariantSummary,
+              ),
             ],
-          ),
-          const SizedBox(height: 6),
-          // ── S-31：端侧 AI 深度估计（真实场景层次）──
-          MiuixButton(
-            key: const ValueKey<String>('wallpaper.ai'),
-            onPressed: (!hasImage || _aiBusy) ? null : _runAiDepth,
-            colors: _aiDepth
-                ? MiuixButtonDefaults.buttonColorsPrimary(context)
-                : null,
-            child: Text(
-              _aiBusy
-                  ? 'AI 推理中…'
-                  : (_aiDepth ? 'AI 深度（已启用）' : '用 AI 估计深度'),
-            ),
-          ),
-          if (_aiInfo.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 4),
-            MiuixText(
-              _aiInfo,
-              style: MiuixTheme.of(context).textStyles.body2,
-              color: colors.onSurfaceVariantSummary,
-            ),
           ],
           const SizedBox(height: 4),
           // ★ 「视差强度」滑块已移除（v1.53）：穿帮带宽 = 相邻层位移差，位移越大
           //   主体轮廓外露出的错位内容越宽。交给用户调就一定会被调到穿帮的位置，
           //   故改为固定值 _amount，并由 _subjectRatio 保证"主体跟着动、幅度小"。
-          MiuixText(
-            '晃动幅度已锁定：层间位移差 ${_layerDelta.round()} px · '
-            '主体占背景的 ${(_subjectRatio * 100).round()}%',
-            style: MiuixTheme.of(context).textStyles.body2,
-            color: colors.onSurfaceVariantSummary,
-          ),
+          if (_toolTab == 2)
+            MiuixText(
+              '晃动幅度已锁定：层间位移差 ${_layerDelta.round()} px · '
+              '主体占背景的 ${(_subjectRatio * 100).round()}%',
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: colors.onSurfaceVariantSummary,
+            ),
           // ★ 分层数：2 层最稳（主体 / 背景两块），层数越多纵深层次越细，
           //   但层与层之间的"纸片感"也越明显。仅 AI 深度下有效。
-          MiuixSliderPreference(
-            title: '分层数',
+          if (_toolTab == 2)
+            MiuixSliderPreference(
+              title: '分层数',
             summary: !_aiDepth
                 ? '（需先运行 AI 深度）'
                 : '$_layerCount 层 · 生效 ${_layerSet?.layers.length ?? 0} 层',
@@ -1007,8 +1074,9 @@ class _PageP24SpatialWallpaperPageState
               _refreshAiDepthImage();
             },
           ),
-          MiuixSliderPreference(
-            title: '焦点深度',
+          if (_toolTab == 3)
+            MiuixSliderPreference(
+              title: '焦点深度',
             summary: '${(_focus * 100).round()}%（点击画面可设定）',
             value: _focus,
             min: 0,
@@ -1022,8 +1090,9 @@ class _PageP24SpatialWallpaperPageState
           // ★ 主体平滑（U-12 保边平滑）：把物体内部深度抹平，同时保住物体
           //   边界的跳变。抹平后**小带宽即可整片钉住主体**，不必把焦点带开大
           //   而牵连到背景。仅在 AI 深度下有意义。
-          MiuixSliderPreference(
-            title: '主体平滑',
+          if (_toolTab == 2)
+            MiuixSliderPreference(
+              title: '主体平滑',
             summary: !_aiDepth
                 ? '（仅 AI 深度生效）'
                 : (_smooth <= 0.01
@@ -1043,6 +1112,8 @@ class _PageP24SpatialWallpaperPageState
           //   不够的（真实深度图上人物内部深度并不均匀）；焦点带把 |深度−焦点|
           //   小于带宽的整片区域压成不动，再向外 smoothstep 平滑过渡 ——
           //   既得到"主体不动、背景滑动"的观感，又不会切出硬分割线。
+          // ══════════ 3 焦点（几何模板用）══════════
+          if (_toolTab == 3) ...<Widget>[
           MiuixSliderPreference(
             title: '焦点带',
             summary: _focusBand < 0.005
@@ -1077,13 +1148,21 @@ class _PageP24SpatialWallpaperPageState
             insideMargin: _itemMargin,
             onValueChange: (double v) => setState(() => _gamma = v),
           ),
-          MiuixSwitchPreference(
-            title: '自动晃动',
+          ], // ══════════ /3 焦点 ══════════
+
+          // ══════════ 2 空间（续）══════════
+          if (_toolTab == 2)
+            MiuixSwitchPreference(
+              title: '自动晃动',
             summary: '用正弦轨迹模拟陀螺仪输入',
             value: _autoWobble,
             onChanged: _toggleAutoWobble,
             insideMargin: _itemMargin,
           ),
+          // ══════════ 调试（顶部 ⋮ 展开）══════════
+          // 这四个是开发工具：深度图预览走的是另一条渲染路径，只有层素材预览
+          // 才反映实际参与合成的东西。收进这里，不占主面板。
+          if (_debugOpen) ...<Widget>[
           MiuixSwitchPreference(
             title: '深度图预览',
             summary: '显示深度图而非成片（调试）',
@@ -1120,10 +1199,12 @@ class _PageP24SpatialWallpaperPageState
             onChanged: (bool v) => setState(() => _showLayer = v ? 2 : 0),
             insideMargin: _itemMargin,
           ),
+          ], // ══════════ /调试 ══════════
 
-          // ══ U-14 手动修正（涂刷 / 擦除）════════════════════════════
+          // ══ U-14 手动修正（涂刷 / 擦除）· 归入「主体」页 ══
           // 自动分割在边界模糊处永远有误差；"哪块像素是人"这件事，用户刷一笔
           // 比任何启发式都准。它与 AI 互补 —— 只修 AI 做错的那一两处。
+          if (_toolTab == 1) ...<Widget>[
           const SizedBox(height: 10),
           MiuixText('手动修正', style: MiuixTheme.of(context).textStyles.body1),
           const SizedBox(height: 6),
@@ -1203,11 +1284,13 @@ class _PageP24SpatialWallpaperPageState
               onPressed: _clearBrush,
               child: const Text('清除手动修改'),
             ),
+          ], // ══════════ /1 主体 ══════════
 
-          // ══ 组件（S-38 / C-67 · 期 1）══════════════════════════════
+          // ══════════ 4 组件 ══════════
           // 组件叠在分层视差画面【之上】，与画面共用同一个晃动源。
           // 期 1：数字时钟 + Z/视差解耦 + 3D 平面透视 + 透明度。
           // 期 2 接入折射玻璃（LensRefraction）、期 6 接入深度遮挡。
+          if (_toolTab == 4) ...<Widget>[
           const SizedBox(height: 10),
           MiuixText('组件', style: MiuixTheme.of(context).textStyles.body1),
           const SizedBox(height: 6),
@@ -1234,9 +1317,115 @@ class _PageP24SpatialWallpaperPageState
           ),
           const SizedBox(height: 4),
           ..._buildComponentControls(colors, hasImage),
+          ], // ══════════ /4 组件 ══════════
+
+          // ══════════ 5 导出 ══════════
+          if (_toolTab == 5) ...<Widget>[
+          MiuixButton(
+            key: const ValueKey<String>('wallpaper.save.panel'),
+            onPressed: (hasImage && !_busy)
+                ? () => unawaited(_saveToGallery())
+                : null,
+            colors: MiuixButtonDefaults.buttonColorsPrimary(context),
+            child: const Text('保存到相册'),
+          ),
+          const SizedBox(height: 6),
+          MiuixText(
+            '保存当前画面（含组件与当前晃动姿态）。'
+            '导出静态图以外的格式（GIF / 互动 HTML）在后续版本。',
+            style: MiuixTheme.of(context).textStyles.body2,
+            color: colors.onSurfaceVariantSummary,
+          ),
+          ], // ══════════ /5 导出 ══════════
         ],
       ),
     );
+  }
+
+  /// 工具行（对齐系统相册编辑器：图标+文字、选中态高亮、再点一次收起）。
+  ///
+  /// 收起的价值：画面能拿回那 30% 的高度（相册编辑器也允许工具行隐藏）。
+  Widget _buildToolBar(MiuixColors colors) {
+    const List<(int, String)> tools = <(int, String)>[
+      (1, '主体'),
+      (2, '空间'),
+      (3, '焦点'),
+      (4, '组件'),
+      (5, '导出'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      child: Row(
+        children: <Widget>[
+          for (final (int id, String label) in tools)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: MiuixButton(
+                  key: ValueKey<String>('wallpaper.tab.$id'),
+                  onPressed: () => setState(() {
+                    _toolTab = _toolTab == id ? 0 : id;
+                    // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
+                    // 用户回去想点画面设焦点会发现点不动。
+                    if (_toolTab != 1) _brushMode = 0;
+                  }),
+                  colors: _toolTab == id
+                      ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                      : null,
+                  child: Text(label),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: MiuixButton(
+              key: const ValueKey<String>('wallpaper.tab.debug'),
+              onPressed: () => setState(() => _debugOpen = !_debugOpen),
+              colors: _debugOpen
+                  ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                  : null,
+              child: const Text('调试'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 保存当前画面到系统相册。
+  ///
+  /// 用画面自己的 RepaintBoundary 截图 —— 所见即所得（含组件、含当前晃动姿态）。
+  /// 复用 PlatFileOps.saveImageToGallery：Android 走 MediaStore → Pictures/Toki，
+  /// 鸿蒙侧由镜像实现接管，不引入任何新的平台依赖。
+  Future<void> _saveToGallery() async {
+    final RenderRepaintBoundary? boundary =
+        _captureKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    setState(() {
+      _busy = true;
+      _aiInfo = '正在保存…';
+    });
+    try {
+      // pixelRatio 3：与多数手机屏幕密度相当，导出的图不会糊
+      final ui.Image img = await boundary.toImage(pixelRatio: 3);
+      final ByteData? bd = await img.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose();
+      if (bd == null) return;
+      final String name =
+          'toki_spatial_${DateTime.now().millisecondsSinceEpoch}.png';
+      final String? msg = await PlatFileOpsRegistry.instance
+          .saveImageToGallery(
+            bytes: bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes),
+            fileName: name,
+          );
+      if (mounted) setState(() => _aiInfo = msg ?? '已保存到相册');
+    } catch (e) {
+      debugPrint('🔴 保存失败: $e');
+      if (mounted) setState(() => _aiInfo = '保存失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// 选中组件的参数（S-38）。未选中时给出操作提示。
