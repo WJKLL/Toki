@@ -353,7 +353,13 @@ class _PageP24SpatialWallpaperPageState
   static Future<ui.Image> _maskToImage(SubjectMask m) {
     final Uint8List rgba = Uint8List(m.length * 4);
     for (int i = 0; i < m.length; i++) {
-      final int a = (m.data[i].clamp(0.0, 1.0) * 150).round();
+      // 显示【陡化后】的值 —— 与实际参与渲染的 alpha 保持一致
+      // （DepthLayerSplitter 里用的是 smoothstep(0.45, 0.75)）。
+      // 若直接画原始 soft 概率，背景那 0.3~0.5 的底色会让整幅画面泛红，
+      // 看起来像"主体覆盖了全图"，从而误判。
+      final double v = m.data[i].clamp(0.0, 1.0);
+      final double t = ((v - 0.45) / 0.30).clamp(0.0, 1.0);
+      final int a = (t * t * (3.0 - 2.0 * t) * 150).round();
       final int o = i * 4;
       rgba[o] = 255;
       rgba[o + 1] = 40;
