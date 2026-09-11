@@ -201,6 +201,16 @@ class OnnxDepthInference implements DepthInference {
     //   padding 区域的深度值是模型对 114 灰填充的预测，毫无意义；而手机竖图
     //   的 padding 面积可达 40%~45%，一旦参与统计就会把 2%/98% 分位数整个带偏，
     //   把真实内容的深度压进极窄区间 —— 表现为"主体与背景区分不清"。
+    //
+    // ★★ 统计与归一化都改到【视差域】(1/米) 做，而不是线性深度域。
+    //
+    //   线性深度的问题：近距离的动态范围被严重压缩。实测一张真人照
+    //   （yolo26n-depth_fp32，640×480）：
+    //     躯干带 1.54~1.95 m、顶部背景 6.15~8.68 m，线性 span = 7.47 m
+    //     → 躯干内部只占归一化区间的一点点，人物与近处地面几乎同色；
+    //   换成视差后，同一区域的归一化动态范围从 0.284 提到 0.616（2.2 倍）。
+    //   物理上也更合理：视差 (1/深度) 就是"像素位移量"，与视觉远近感直接对应，
+    //   也是单目深度模型的惯用输出表示。
     final int stepX = math.max(1, vw ~/ 64);
     final int stepY = math.max(1, vh ~/ 64);
     final List<double> samples = <double>[];
@@ -208,12 +218,13 @@ class OnnxDepthInference implements DepthInference {
       final int rowBase = y * w;
       for (int x = vx; x < vx + vw; x += stepX) {
         final double v = (raw[rowBase + x] as num).toDouble();
-        if (v.isFinite && v > 0) samples.add(v);
+        if (v.isFinite && v > 1e-6) samples.add(1.0 / v);
       }
     }
     if (samples.isEmpty) return null;
     samples.sort();
 
+    // lo = 远端的视差，hi = 近端的视差（视差越大越近）。
     final double lo = samples[(samples.length * 0.02).floor().clamp(
           0,
           samples.length - 1,
@@ -222,31 +233,32 @@ class OnnxDepthInference implements DepthInference {
           0,
           samples.length - 1,
         )];
-    final double span = math.max(hi - lo, 1e-6);
+    final double span = math.max(hi - lo, 1e-9);
 
-    // ★ 只输出【有效区域】，并翻转深度方向：
-    //   1) 裁掉 padding —— 深度图必须与原图**同宽高比**。否则 shader 用同一套 uv
-    //      采样 uTexture（原图，1440×2626）与 uDepth（含 pad 的 640×640 方图）会
-    //      **整体错位**：深度图里人物的位置其实对应到了原图的其他位置。实测表现
-    //      正是用户报告的"人物背后的背景无法与人物区分"。
-    //   2) 翻转深度方向 —— 模型输出"米数越大 = 越远"，而 shader 的约定是
-    //      0 = 最远、1 = 最近。不翻转则天空（远）被当成最近、人物（近）被当成最远。
+    // ★ 只输出【有效区域】：深度图必须与原图**同宽高比**。否则 shader 用同一套
+    //   uv 采样 uTexture（原图，1440×2626）与 uDepth（含 pad 的 640×640 方图）
+    //   会**整体错位**：深度图里人物的位置其实对应到了原图的其他位置 —— 实测
+    //   表现正是"人物背后的背景无法与人物区分"。
+    //
+    // ★ 不再需要翻转深度方向：视差越大 = 越近，天然就是 shader 要的
+    //   0 = 最远 / 1 = 最近（线性深度域才需要一次 1.0−n 的翻转）。
     final Float32List out = Float32List(vw * vh);
     for (int y = 0; y < vh; y++) {
       final int srcBase = (vy + y) * w + vx;
       final int dstBase = y * vw;
       for (int x = 0; x < vw; x++) {
         final double v = (raw[srcBase + x] as num).toDouble();
-        final double n = v.isFinite ? ((v - lo) / span).clamp(0.0, 1.0) : 0.0;
-        out[dstBase + x] = 1.0 - n;
+        final double disp = (v.isFinite && v > 1e-6) ? 1.0 / v : 0.0;
+        out[dstBase + x] = ((disp - lo) / span).clamp(0.0, 1.0);
       }
     }
     return DepthResult(
       width: vw,
       height: vh,
       data: out,
-      minMeters: lo,
-      maxMeters: hi,
+      // 视差域的分位值换算回米数（仅用于界面展示）。
+      minMeters: 1.0 / math.max(hi, 1e-6),
+      maxMeters: 1.0 / math.max(lo, 1e-6),
     );
   }
 }
