@@ -292,9 +292,6 @@ class _PageP24SpatialWallpaperPageState
       // ★ S-39：主体分割。不可用/失败 → null，分层自动退回纯深度阈值 ——
       //   分割只负责"让分层更准"，绝不允许它阻断整条链路。
       final SubjectMask? mask = await _runSegmentation(bytes);
-      // 预览图与 mask 同步产出（否则每次切开关都要重算一遍）
-      final ui.Image? maskImg =
-          mask == null ? null : await _maskToImage(mask);
       // ★ 切成图层 —— "分层 + 图层平移"渲染的数据基础
       final ui.Image? photoImg = _photo;
       final DepthLayerSet? set = photoImg == null
@@ -308,6 +305,12 @@ class _PageP24SpatialWallpaperPageState
               // 里那片填充会滑出主体轮廓的距离。
               subjectDilate: _layerDelta,
             );
+      // ★ 预览用【最终生效的那份 mask】，而不是模型原始输出 ——
+      //   闭运算、深度一致性过滤、膨胀都会改变它；显示原始值会与实渲染不一致，
+      //   继续误导判断（前面已经因为"预览 ≠ 实际"吃过几轮亏）。
+      final SubjectMask? effective = set?.subjectMask ?? mask;
+      final ui.Image? maskImg =
+          effective == null ? null : await _maskToImage(effective);
       if (!mounted) {
         img.dispose();
         set?.dispose();

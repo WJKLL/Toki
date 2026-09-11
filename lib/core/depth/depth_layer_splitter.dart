@@ -45,6 +45,7 @@ class DepthLayerSet {
     required this.workWidth,
     required this.workHeight,
     required this.margin,
+    this.subjectMask,
   });
 
   /// 已按 centerDepth 升序（**远 → 近**，渲染顺序即此）。
@@ -56,6 +57,12 @@ class DepthLayerSet {
 
   /// 层图四周的余量。
   final int margin;
+
+  /// 最终生效的主体 mask（闭运算 + 深度一致性过滤 + 膨胀之后的那份）。
+  ///
+  /// ★ 之所以带出来：调试时界面上该显示**真正参与分层的那一份**，而不是模型
+  ///   原始输出 —— 两者不一致会让预览继续误导判断（这一点已经吃过亏）。
+  final SubjectMask? subjectMask;
 
   void dispose() {
     for (final DepthLayer l in layers) {
@@ -135,15 +142,28 @@ abstract final class DepthLayerSplitter {
     SubjectMask? subj = subject;
     if (subj != null) {
       final int sw = subj.width;
-      if (sw > 0) {
-        // ★ 用【形态学闭运算】填补 mask 内部的小缺口，而不是"沿深度生长"。
-        //
-        //   生长试过两版都失败：只看局部深度连续 → 蔓延吞掉周围背景；再加深度
-        //   下限 → 仍然收纳了背景。根本原因是人物周围的背景深度常常和身体接近，
-        //   而"生长"一旦判错就【无法回收】。
-        //   闭运算（先膨胀后腐蚀）只填补凹陷与断裂，不会把整体轮廓推大，参数
-        //   风险小得多 —— 这正是"漏抠的腿"需要的修正。
+      final int sh = subj.height;
+      if (sw > 0 && sh > 0 && w > 0 && h > 0) {
+        // ① 闭运算：填补 mask 内部的凹陷与断裂（不推大整体轮廓）。
         subj = subj.closed(math.max(2, (sw * 0.02).round()));
+
+        // ② ★ 深度一致性过滤：剔掉"mask 说是主体、深度却属于背景"的误判块。
+        //    实测主体层素材里含着一片实心背景（树荫/路面），正是这类误判。
+        //    按 mask 分辨率降采样深度即可（判断不需要高精度）。
+        final Float32List lowDepth = Float32List(sw * sh);
+        for (int y = 0; y < sh; y++) {
+          final int sy = (y * h ~/ sh).clamp(0, h - 1);
+          final int row = sy * w;
+          for (int x = 0; x < sw; x++) {
+            final int sx = (x * w ~/ sw).clamp(0, w - 1);
+            lowDepth[y * sw + x] = dw[row + sx];
+          }
+        }
+        subj = SubjectMask(
+          width: sw,
+          height: sh,
+          data: _depthConsistency(subj.data, lowDepth),
+        );
       }
       if (subjectDilate > 0.5 && photo.width > 0) {
         final SubjectMask s = subj;
@@ -290,7 +310,40 @@ abstract final class DepthLayerSplitter {
       workWidth: w,
       workHeight: h,
       margin: margin,
+      // 带出最终生效的 mask，供界面与实际渲染做一致对照。
+      subjectMask: subj,
     );
+  }
+
+  /// 把"mask 判为主体、但深度明显属于背景"的像素剔掉。
+  ///
+  /// ★ 为什么需要（实测：主体层素材截图）
+  ///   主体层素材里，人物之外还含着一片实心不透明的背景（树荫/路面）——
+  ///   分割模型误判了一块。这类误判区域**几乎总是深度比人体远得多**，
+  ///   于是可以用深度一致性识别并剔除。
+  ///
+  /// ★ 注意这是【收缩】，不是早先失败过的"生长"
+  ///   生长只增不减、一旦蔓延无法回收（试了两版都失败）。这里只减不增：
+  ///   以 mask 核心区域（>0.75）的深度中位数为基准，明显更远的像素一律剔出。
+  ///   人体各部位（腿、手臂）与躯干深度接近，不会被误伤。
+  static Float32List _depthConsistency(
+    Float32List mask,
+    Float32List depth,
+  ) {
+    final List<double> core = <double>[];
+    for (int i = 0; i < mask.length; i++) {
+      if (mask[i] > 0.75) core.add(depth[i]);
+    }
+    if (core.length < 16) return mask;
+    core.sort();
+    final double med = core[core.length ~/ 2];
+    // 比核心深度再远 0.18 个归一化单位以上 → 判定为背景误判。
+    final double floorDepth = med - 0.18;
+    final Float32List out = Float32List.fromList(mask);
+    for (int i = 0; i < out.length; i++) {
+      if (out[i] > 0.0 && depth[i] < floorDepth) out[i] = 0.0;
+    }
+    return out;
   }
 
   /// 以 mask 为**种子**、沿【深度连续】方向生长，把分割模型漏抠的身体部位补回来。
