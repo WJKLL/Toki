@@ -111,6 +111,30 @@ class _PageP24SpatialWallpaperPageState
   /// 【立刻看到笔迹】，所以轨迹先画出来，松手再统一提交。
   final List<Offset> _brushTrail = <Offset>[];
 
+  /// 橡皮的笔刷半径（与画笔【分开记忆】）。
+  ///
+  /// 擦掉一小块残留用细笔、补一大片漏抠用粗笔 —— 两者需要的粗细完全不同，
+  /// 共用一个数值会逼着用户来回拖滑块。
+  double _eraseSize = 0.035;
+
+  /// 涂刷时当前生效的笔刷半径。
+  double get _activeBrushSize => _brushMode == 2 ? _eraseSize : _brushSize;
+
+  /// 撤销栈：每次落笔【之前】压入一份编辑层快照。
+  ///
+  /// 存整份快照而不是"操作记录"：编辑层只有 mask 分辨率（典型 280×640，
+  /// 每份约 0.7MB），12 步不到 9MB；换来的是撤销瞬间完成、逻辑零分支
+  /// （重放式撤销要在每次撤销时重算全部笔迹，越撤越慢）。
+  final List<Float32List> _undoStack = <Float32List>[];
+  static const int _undoLimit = 12;
+
+  /// 涂刷模式下的缩放/平移控制器。
+  ///
+  /// 双指缩放 + 平移，单指留给笔刷 —— 所以 InteractiveViewer 要 panEnabled:false。
+  /// 笔刷坐标不用手动逆变换：GestureDetector 在变换后的 child 内部，
+  /// localPosition 本来就是 child 自己的坐标系。
+  final TransformationController _zoomCtrl = TransformationController();
+
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
   DepthLayerSet? _layerSet;
@@ -225,6 +249,7 @@ class _PageP24SpatialWallpaperPageState
   @override
   void dispose() {
     _ticker.dispose();
+    _zoomCtrl.dispose();
     _maskImage?.dispose();
     _layerSet?.dispose();
     _depth?.dispose();
@@ -422,18 +447,41 @@ class _PageP24SpatialWallpaperPageState
       if (_brushTrail.isNotEmpty) setState(_brushTrail.clear);
       return;
     }
+    // ★ 落笔前先压一份快照 —— 撤销要回到"这一笔之前"的状态。
+    _undoStack.add(Float32List.fromList(em.data));
+    if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
+
     final bool erase = _brushMode == 2;
+    final double size = _activeBrushSize;
     // 逐段插值，避免手指快划时留下断续的圆点
     Offset prev = _brushTrail.first;
-    em.stamp(prev.dx, prev.dy, _brushSize, erase: erase);
+    em.stamp(prev.dx, prev.dy, size, erase: erase);
     for (int i = 1; i < _brushTrail.length; i++) {
       final Offset cur = _brushTrail[i];
-      em.stroke(prev.dx, prev.dy, cur.dx, cur.dy, _brushSize, erase: erase);
+      em.stroke(prev.dx, prev.dy, cur.dx, cur.dy, size, erase: erase);
       prev = cur;
     }
     setState(_brushTrail.clear);
     // 笔迹变了 → 重走一遍分层（AI 管线 + 编辑层）
     _refreshAiDepthImage();
+  }
+
+  /// 撤销上一笔。
+  void _undoBrush() {
+    final SubjectEditMask? em = _editMask;
+    if (em == null || _undoStack.isEmpty) return;
+    final Float32List snap = _undoStack.removeLast();
+    setState(() {
+      em.data.setAll(0, snap);
+      _brushTrail.clear();
+    });
+    _refreshAiDepthImage();
+  }
+
+  /// 复位涂刷视图（缩放/平移回到初始）。
+  void _resetZoom() {
+    if (_zoomCtrl.value.isIdentity()) return;
+    setState(() => _zoomCtrl.value = Matrix4.identity());
   }
 
   /// 清除全部手动修改（回到纯 AI 的结果）。
@@ -709,7 +757,17 @@ class _PageP24SpatialWallpaperPageState
               );
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
-                child: GestureDetector(
+                // ★ 涂刷模式下才允许缩放：双指缩放/移动画面，单指留给笔刷
+                //   （panEnabled 恒为 false，否则单指一划就把画面拖走了）。
+                //   笔刷坐标不需要手动逆变换 —— GestureDetector 在变换后的
+                //   child 内部，localPosition 本来就是 child 自己的坐标系。
+                child: InteractiveViewer(
+                  transformationController: _zoomCtrl,
+                  panEnabled: false,
+                  scaleEnabled: _brushMode > 0,
+                  minScale: 1,
+                  maxScale: 5,
+                  child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   // ★ 涂刷模式下画面手势整体让位给笔刷 —— 否则点一下就会顺手
                   //   把焦点挪走，用户涂到一半画面就变样了。
@@ -808,7 +866,7 @@ class _PageP24SpatialWallpaperPageState
                           child: CustomPaint(
                             painter: _BrushTrailPainter(
                               trail: _brushTrail,
-                              radius: _brushSize,
+                              radius: _activeBrushSize,
                               erase: _brushMode == 2,
                             ),
                           ),
@@ -830,6 +888,7 @@ class _PageP24SpatialWallpaperPageState
                       ),
                     ],
                   ),
+                ),
                 ),
               );
             },
@@ -1098,17 +1157,43 @@ class _PageP24SpatialWallpaperPageState
           ),
           if (_brushMode > 0) ...<Widget>[
             MiuixSliderPreference(
-              title: '笔刷大小',
-              summary: '${(_brushSize * 100).round()}% 画面短边'
+              title: _brushMode == 2 ? '橡皮大小' : '笔刷大小',
+              summary: '${(_activeBrushSize * 100).round()}% 画面短边'
                   '（${_brushMode == 2 ? "擦除" : "涂抹"}中，松手生效）',
-              value: _brushSize,
+              value: _activeBrushSize,
               min: 0.02,
               max: 0.30,
               insideMargin: _itemMargin,
-              onValueChange: (double v) => setState(() => _brushSize = v),
+              onValueChange: (double v) => setState(() {
+                // 画笔与橡皮各自记忆大小：擦细节和补大片需要的粗细差很多
+                if (_brushMode == 2) {
+                  _eraseSize = v;
+                } else {
+                  _brushSize = v;
+                }
+              }),
+            ),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: MiuixButton(
+                    key: const ValueKey<String>('wallpaper.brush.undo'),
+                    onPressed: _undoStack.isEmpty ? null : _undoBrush,
+                    child: Text('撤销（${_undoStack.length}）'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MiuixButton(
+                    key: const ValueKey<String>('wallpaper.brush.reset'),
+                    onPressed: _resetZoom,
+                    child: const Text('复位视图'),
+                  ),
+                ),
+              ],
             ),
             MiuixText(
-              '提示：先开「主体遮罩预览」看清 AI 的判定，再补刷漏掉的部分',
+              '双指缩放/移动画面，单指涂刷；最多可撤销 $_undoLimit 笔',
               style: MiuixTheme.of(context).textStyles.body2,
               color: colors.onSurfaceVariantSummary,
             ),
