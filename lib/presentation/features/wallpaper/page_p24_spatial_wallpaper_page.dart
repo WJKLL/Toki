@@ -137,6 +137,20 @@ class _PageP24SpatialWallpaperPageState
   /// 立体感"（对齐苹果空间照片）。取 0 会退化成旧的"主体钉死"反向模型：层间差
   /// 被拉满、穿帮明显，而且主体完全没有立体感。
   static const double _subjectRatio = 0.5;
+
+  /// 主体层的【立体起伏】幅度（逻辑像素）。
+  ///
+  /// ★ 这才是"立体感"的关键一层
+  ///   主体若只做整层刚性平移，内部所有像素位移完全相同 —— 看上去是一块
+  ///   硬邦邦的平板。真实物体鼻梁比耳朵近、肩膀比腰近，晃起来位移应当各不
+  ///   相同。这里让主体层的位移随【深度】变化，于是内部产生起伏（浮雕感）。
+  ///
+  ///   为什么以前不敢：逐像素位移会产生遮挡空洞，这正是当初改成"整层平移"
+  ///   的原因。现在主体层之下有背景层兜底、空洞会被填上，而起伏只有几个
+  ///   像素、远小于主体自身尺寸，所以可以安全启用。
+  ///
+  ///   取 6 → 主体内部起伏约 ±3px：够看出体积，又不会把空洞撑大。
+  static const double _relief = 6;
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -637,9 +651,12 @@ class _PageP24SpatialWallpaperPageState
                           final Widget picture = (set != null && !_showDepth)
                               ? LayeredParallaxView(
                                   layerSet: set,
+                                  // 深度图给主体层做立体起伏（见 _relief 说明）
+                                  depthImage: depth,
                                   shift: shift,
                                   amount: motionAmount,
                                   subjectRatio: _subjectRatio,
+                                  relief: _relief,
                                 )
                               : ParallaxView(
                                   image: photo,
