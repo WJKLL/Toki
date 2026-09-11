@@ -25,6 +25,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 
 import 'depth_inference.dart';
+import 'subject_edit_mask.dart';
 import 'subject_segmentation.dart';
 
 /// 一个视差图层。
@@ -85,6 +86,9 @@ abstract final class DepthLayerSplitter {
     //   露出来就是"一块一块"。把主体层的覆盖范围外扩同样的距离即可盖住它 ——
     //   而膨胀区显示的是【原图】内容，所以看不出被扩大过。
     double subjectDilate = 0,
+    // ★ 手动修正层（涂刷 / 擦除）。应用在【整条 AI 管线之后】——
+    //   用户说了算，压过闭运算/深度筛选/膨胀的一切判断。
+    SubjectEditMask? editMask,
     // ⚠️ 羽化宽度必须【近乎为零】，这是本方案最容易踩的坑：
     //    层边界处只要有像素被两层 alpha 同时覆盖，它就会被两层内容半透明叠加，
     //    而两层位移不同 → 双影 + 对比度下降。用户实测表现："AI 计算后渲染的
@@ -182,6 +186,34 @@ abstract final class DepthLayerSplitter {
         final SubjectMask s = subj;
         // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
         subj = s.dilated((subjectDilate * s.width / photo.width).round());
+      }
+
+      // ④ ★ 手动修正层放在【最后】：用户说了算，压过前面所有自动处理。
+      //    放在膨胀之后是有意的 —— 用户擦掉的地方不该再被膨胀加回来。
+      if (editMask != null && !editMask.isEmpty) {
+        final int sw2 = subj.width;
+        final int sh2 = subj.height;
+        final Float32List edited = Float32List.fromList(subj.data);
+        if (editMask.width == sw2 && editMask.height == sh2) {
+          editMask.applyTo(edited);
+        } else {
+          // 分辨率不一致（例如换过图）→ 就近取样，保证不越界
+          for (int y = 0; y < sh2; y++) {
+            final int ey =
+                (y * editMask.height ~/ sh2).clamp(0, editMask.height - 1);
+            for (int x = 0; x < sw2; x++) {
+              final int ex =
+                  (x * editMask.width ~/ sw2).clamp(0, editMask.width - 1);
+              final double e = editMask.data[ey * editMask.width + ex];
+              if (e > 0) {
+                edited[y * sw2 + x] = 1.0;
+              } else if (e < 0) {
+                edited[y * sw2 + x] = 0.0;
+              }
+            }
+          }
+        }
+        subj = SubjectMask(width: sw2, height: sh2, data: edited);
       }
     }
     final Float32List? mw = subj?.resample(w, h);

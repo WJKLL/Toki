@@ -26,6 +26,7 @@ import '../../../core/depth/depth_layer_splitter.dart';
 import '../../../core/depth/depth_post_process.dart';
 import '../../../core/depth/onnx_depth_inference.dart';
 import '../../../core/depth/onnx_subject_segmentation.dart';
+import '../../../core/depth/subject_edit_mask.dart';
 import '../../../core/depth/subject_segmentation.dart';
 import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/wallpaper/depth_template_renderer.dart';
@@ -81,7 +82,6 @@ class _PageP24SpatialWallpaperPageState
   ui.Image? _maskImage;
 
   /// 层素材预览：0 = 关，1 = 背景层，2 = 主体层。
-  ///
   /// ★ 为什么需要它（关键诊断手段）
   ///   "深度图预览"走的是 ParallaxView（逐像素 shader），而实际渲染走的是
   ///   LayeredParallaxView（分层 + 整层平移）—— **两条完全不同的路径**。
@@ -90,6 +90,26 @@ class _PageP24SpatialWallpaperPageState
   ///   而这些在深度图预览里一个都看不到。把层图原样铺出来（棋盘格衬底），
   ///   才能在"渲染出错"时一眼分清是素材的问题还是合成的问题。
   int _showLayer = 0;
+
+  // ── U-14 手动修正（涂刷 / 擦除）────────────────────────────
+  /// 手动修正层（分辨率与 AI mask 一致）。为空 = 还没进过涂刷模式。
+  ///
+  /// 与 AI 是【互补】关系：编辑层叠加在整条 AI 管线之后，用户只修 AI 做错的
+  /// 那一两处，其余仍旧交给 AI 承担。
+  SubjectEditMask? _editMask;
+
+  /// 笔刷模式：0 = 关闭（画面手势归焦点/组件），1 = 画笔，2 = 橡皮。
+  int _brushMode = 0;
+
+  /// 笔刷半径（归一化，相对画面短边）。
+  double _brushSize = 0.06;
+
+  /// 本次涂抹的轨迹（归一化坐标），仅用于实时反馈；松手后才写入 [_editMask]。
+  ///
+  /// 之所以"先画轨迹、松手再落盘"：写入编辑层后要重建分层，而重建要跑完整的
+  /// 闭运算 / 深度连通筛选 / 层图生成，每帧做会明显卡顿；用户需要的只是
+  /// 【立刻看到笔迹】，所以轨迹先画出来，松手再统一提交。
+  final List<Offset> _brushTrail = <Offset>[];
 
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
@@ -319,6 +339,7 @@ class _PageP24SpatialWallpaperPageState
               // 膨胀量 = 层间位移差：背景层比主体层多走的距离，正好等于背景层
               // 里那片填充会滑出主体轮廓的距离。
               subjectDilate: _layerDelta,
+              editMask: _editMask,
             );
       // ★ 预览用【最终生效的那份 mask】，而不是模型原始输出 ——
       //   闭运算、深度一致性过滤、膨胀都会改变它；显示原始值会与实渲染不一致，
@@ -360,7 +381,6 @@ class _PageP24SpatialWallpaperPageState
   }
 
   /// 深度后处理链：保边平滑 → **引导滤波**（U-13）。
-  ///
   /// 抽成一个方法是因为两条路径都需要它（首次推理 / 调「主体平滑」后重建）；
   /// 两条路径必须产出一致的深度图，否则调一次平滑就会看到另一种边缘。
   ///
@@ -368,6 +388,65 @@ class _PageP24SpatialWallpaperPageState
   ///   前面所有针对边界的启发式（深度阈值、连通性）都是在拿【深度值】去猜
   ///   边界在哪，而物体边界本来就画在图像上（亮度/颜色在那里有明显跳变）。
   ///   引导滤波以原图为引导、让深度边缘对齐图像的真实边缘 —— 这才用对了信息。
+  // ── U-14 手动修正（涂刷 / 擦除）────────────────────────────
+  /// 进入 / 切换涂刷模式（再点一次同一个模式即退出）。
+  void _setBrushMode(int mode) {
+    final SubjectMask? m = _subjectMask;
+    if (m == null) return;
+    setState(() {
+      _brushMode = _brushMode == mode ? 0 : mode;
+      _brushTrail.clear();
+      if (_brushMode > 0) {
+        _editMask ??= SubjectEditMask(m.width, m.height);
+      }
+    });
+  }
+
+  /// 记录一个涂抹点（只画轨迹，不落盘）。
+  void _brushMove(Offset local, Size size, {bool first = false}) {
+    if (size.isEmpty || _brushMode == 0) return;
+    final Offset uv = Offset(
+      (local.dx / size.width).clamp(0.0, 1.0),
+      (local.dy / size.height).clamp(0.0, 1.0),
+    );
+    setState(() {
+      if (first) _brushTrail.clear();
+      _brushTrail.add(uv);
+    });
+  }
+
+  /// 松手：把轨迹写进 [_editMask]，然后重建分层。
+  void _commitBrush() {
+    final SubjectEditMask? em = _editMask;
+    if (em == null || _brushTrail.isEmpty) {
+      if (_brushTrail.isNotEmpty) setState(_brushTrail.clear);
+      return;
+    }
+    final bool erase = _brushMode == 2;
+    // 逐段插值，避免手指快划时留下断续的圆点
+    Offset prev = _brushTrail.first;
+    em.stamp(prev.dx, prev.dy, _brushSize, erase: erase);
+    for (int i = 1; i < _brushTrail.length; i++) {
+      final Offset cur = _brushTrail[i];
+      em.stroke(prev.dx, prev.dy, cur.dx, cur.dy, _brushSize, erase: erase);
+      prev = cur;
+    }
+    setState(_brushTrail.clear);
+    // 笔迹变了 → 重走一遍分层（AI 管线 + 编辑层）
+    _refreshAiDepthImage();
+  }
+
+  /// 清除全部手动修改（回到纯 AI 的结果）。
+  void _clearBrush() {
+    final SubjectEditMask? em = _editMask;
+    if (em == null) return;
+    setState(() {
+      em.clear();
+      _brushTrail.clear();
+    });
+    _refreshAiDepthImage();
+  }
+
   Future<DepthResult> _refineDepth(DepthResult raw) async {
     DepthResult d = DepthPostProcess.smooth(raw, _smooth);
     final ui.Image? guide = _photo;
@@ -440,6 +519,7 @@ class _PageP24SpatialWallpaperPageState
         // 复用导入时算好的主体 mask —— 调「主体平滑/分层数」不必重跑分割。
         subject: _subjectMask,
         subjectDilate: _layerDelta,
+        editMask: _editMask,
       );
       if (!mounted) {
         img.dispose();
@@ -631,10 +711,21 @@ class _PageP24SpatialWallpaperPageState
                 borderRadius: BorderRadius.circular(18),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTapUp: (TapUpDetails d) =>
-                      _setFocusAt(d.localPosition, size),
-                  onPanUpdate: (DragUpdateDetails d) =>
-                      _moveFocusBy(d.delta, size),
+                  // ★ 涂刷模式下画面手势整体让位给笔刷 —— 否则点一下就会顺手
+                  //   把焦点挪走，用户涂到一半画面就变样了。
+                  onTapUp: _brushMode > 0
+                      ? null
+                      : (TapUpDetails d) => _setFocusAt(d.localPosition, size),
+                  onPanStart: _brushMode > 0
+                      ? (DragStartDetails d) =>
+                          _brushMove(d.localPosition, size, first: true)
+                      : null,
+                  onPanUpdate: _brushMode > 0
+                      ? (DragUpdateDetails d) =>
+                          _brushMove(d.localPosition, size)
+                      : (DragUpdateDetails d) => _moveFocusBy(d.delta, size),
+                  onPanEnd:
+                      _brushMode > 0 ? (DragEndDetails _) => _commitBrush() : null,
                   child: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
@@ -708,6 +799,18 @@ class _PageP24SpatialWallpaperPageState
                           child: _LayerMaterialView(
                             layerSet: _layerSet!,
                             index: _showLayer - 1,
+                          ),
+                        ),
+                      // 涂刷轨迹的实时反馈 —— 只画轨迹，松手才写入编辑层并重建
+                      // 分层（重建要跑完整的闭运算/深度筛选/层图生成，每帧做会卡）。
+                      if (_brushTrail.isNotEmpty)
+                        IgnorePointer(
+                          child: CustomPaint(
+                            painter: _BrushTrailPainter(
+                              trail: _brushTrail,
+                              radius: _brushSize,
+                              erase: _brushMode == 2,
+                            ),
                           ),
                         ),
                       // 焦点指示器（不拦截手势）
@@ -960,6 +1063,63 @@ class _PageP24SpatialWallpaperPageState
             insideMargin: _itemMargin,
           ),
 
+          // ══ U-14 手动修正（涂刷 / 擦除）════════════════════════════
+          // 自动分割在边界模糊处永远有误差；"哪块像素是人"这件事，用户刷一笔
+          // 比任何启发式都准。它与 AI 互补 —— 只修 AI 做错的那一两处。
+          const SizedBox(height: 10),
+          MiuixText('手动修正', style: MiuixTheme.of(context).textStyles.body1),
+          const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: MiuixButton(
+                  key: const ValueKey<String>('wallpaper.brush.paint'),
+                  onPressed:
+                      _subjectMask == null ? null : () => _setBrushMode(1),
+                  colors: _brushMode == 1
+                      ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                      : null,
+                  child: const Text('画笔'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: MiuixButton(
+                  key: const ValueKey<String>('wallpaper.brush.erase'),
+                  onPressed:
+                      _subjectMask == null ? null : () => _setBrushMode(2),
+                  colors: _brushMode == 2
+                      ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                      : null,
+                  child: const Text('橡皮'),
+                ),
+              ),
+            ],
+          ),
+          if (_brushMode > 0) ...<Widget>[
+            MiuixSliderPreference(
+              title: '笔刷大小',
+              summary: '${(_brushSize * 100).round()}% 画面短边'
+                  '（${_brushMode == 2 ? "擦除" : "涂抹"}中，松手生效）',
+              value: _brushSize,
+              min: 0.02,
+              max: 0.30,
+              insideMargin: _itemMargin,
+              onValueChange: (double v) => setState(() => _brushSize = v),
+            ),
+            MiuixText(
+              '提示：先开「主体遮罩预览」看清 AI 的判定，再补刷漏掉的部分',
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: colors.onSurfaceVariantSummary,
+            ),
+          ],
+          if (_brushMode == 0 && _editMask != null && !_editMask!.isEmpty)
+            MiuixButton(
+              key: const ValueKey<String>('wallpaper.brush.clear'),
+              onPressed: _clearBrush,
+              child: const Text('清除手动修改'),
+            ),
+
           // ══ 组件（S-38 / C-67 · 期 1）══════════════════════════════
           // 组件叠在分层视差画面【之上】，与画面共用同一个晃动源。
           // 期 1：数字时钟 + Z/视差解耦 + 3D 平面透视 + 透明度。
@@ -1129,6 +1289,64 @@ class _PageP24SpatialWallpaperPageState
       ),
     ];
   }
+}
+
+/// 涂刷轨迹的实时反馈：红色 = 画笔（加主体），蓝色 = 橡皮（去主体）。
+///
+/// 只画本次轨迹（归一化坐标 + 归一化半径），不做任何像素写入 ——
+/// 真正的落盘在松手后统一进行。
+class _BrushTrailPainter extends CustomPainter {
+  const _BrushTrailPainter({
+    required this.trail,
+    required this.radius,
+    required this.erase,
+  });
+
+  final List<Offset> trail;
+  final double radius;
+  final bool erase;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (trail.isEmpty || size.isEmpty) return;
+    final double r = radius * size.shortestSide;
+    final Paint p = Paint()
+      ..color = (erase
+              ? const Color(0xFF3B82F6)
+              : const Color(0xFFFF3B30))
+          .withValues(alpha: 0.45)
+      ..style = PaintingStyle.fill;
+
+    if (trail.length == 1) {
+      canvas.drawCircle(
+        Offset(trail.first.dx * size.width, trail.first.dy * size.height),
+        r,
+        p,
+      );
+      return;
+    }
+    for (int i = 1; i < trail.length; i++) {
+      final Offset a =
+          Offset(trail[i - 1].dx * size.width, trail[i - 1].dy * size.height);
+      final Offset b =
+          Offset(trail[i].dx * size.width, trail[i].dy * size.height);
+      // 用圆头粗线把相邻点连起来 —— 与 stamp 的插值行为一致，不会出现断续
+      canvas.drawLine(
+        a,
+        b,
+        Paint()
+          ..color = p.color
+          ..strokeWidth = r * 2
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BrushTrailPainter old) =>
+      old.trail.length != trail.length ||
+      old.radius != radius ||
+      old.erase != erase;
 }
 
 /// 层素材预览：棋盘格衬底 + 指定图层的原始像素。
