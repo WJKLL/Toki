@@ -79,6 +79,17 @@ class _PageP24SpatialWallpaperPageState
   bool _showMask = false;
   ui.Image? _maskImage;
 
+  /// 层素材预览：0 = 关，1 = 背景层，2 = 主体层。
+  ///
+  /// ★ 为什么需要它（关键诊断手段）
+  ///   "深度图预览"走的是 ParallaxView（逐像素 shader），而实际渲染走的是
+  ///   LayeredParallaxView（分层 + 整层平移）—— **两条完全不同的路径**。
+  ///   前者正确并不能推出后者正确。
+  ///   真正参与合成的是【层图】：里面含 alpha、含"猜"出来的填充内容，
+  ///   而这些在深度图预览里一个都看不到。把层图原样铺出来（棋盘格衬底），
+  ///   才能在"渲染出错"时一眼分清是素材的问题还是合成的问题。
+  int _showLayer = 0;
+
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
   DepthLayerSet? _layerSet;
@@ -650,6 +661,16 @@ class _PageP24SpatialWallpaperPageState
                             fit: BoxFit.fill,
                           ),
                         ),
+                      // 层素材预览：把实际参与合成的图层原样铺出来（含填充、
+                      // 含 alpha）。棋盘格衬底让透明区域一目了然。
+                      // 放在最后 = 盖在其它预览之上。
+                      if (_showLayer > 0 && _layerSet != null)
+                        IgnorePointer(
+                          child: _LayerMaterialView(
+                            layerSet: _layerSet!,
+                            index: _showLayer - 1,
+                          ),
+                        ),
                       // 焦点指示器（不拦截手势）
                       IgnorePointer(
                         child: Stack(
@@ -879,6 +900,26 @@ class _PageP24SpatialWallpaperPageState
             onChanged: (bool v) => setState(() => _showMask = v),
             insideMargin: _itemMargin,
           ),
+          // ★ 层素材预览：这两个才反映【实际参与渲染的东西】。
+          //   深度图预览走的是另一条路径，它对了不代表渲染就对。
+          MiuixSwitchPreference(
+            title: '背景层素材',
+            summary: _layerSet == null
+                ? '（需先点「用 AI 估计深度」）'
+                : '看背景层里实际是什么（棋盘格 = 透明）',
+            value: _showLayer == 1,
+            onChanged: (bool v) => setState(() => _showLayer = v ? 1 : 0),
+            insideMargin: _itemMargin,
+          ),
+          MiuixSwitchPreference(
+            title: '主体层素材',
+            summary: _layerSet == null
+                ? '（需先点「用 AI 估计深度」）'
+                : '看主体层里实际是什么（棋盘格 = 透明）',
+            value: _showLayer == 2,
+            onChanged: (bool v) => setState(() => _showLayer = v ? 2 : 0),
+            insideMargin: _itemMargin,
+          ),
 
           // ══ 组件（S-38 / C-67 · 期 1）══════════════════════════════
           // 组件叠在分层视差画面【之上】，与画面共用同一个晃动源。
@@ -1049,6 +1090,59 @@ class _PageP24SpatialWallpaperPageState
       ),
     ];
   }
+}
+
+/// 层素材预览：棋盘格衬底 + 指定图层的原始像素。
+///
+/// 为什么要看这个：深度图预览走的是另一条渲染路径（逐像素 shader），它正确
+/// 并不能推出分层渲染正确。真正参与合成的是【层图】—— 里面含 alpha、含"猜"
+/// 出来的填充内容，而这一切在深度图预览里完全看不到。
+class _LayerMaterialView extends StatelessWidget {
+  const _LayerMaterialView({required this.layerSet, required this.index});
+
+  final DepthLayerSet layerSet;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<DepthLayer> ls = layerSet.layers;
+    if (ls.isEmpty) return const SizedBox.shrink();
+    final DepthLayer l = ls[index.clamp(0, ls.length - 1)];
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        // 棋盘格在下：层的 alpha 为 0 处会透出它，一眼可辨。
+        const CustomPaint(painter: _CheckerPainter()),
+        RawImage(image: l.image, fit: BoxFit.fill),
+      ],
+    );
+  }
+}
+
+/// 棋盘格衬底（让 alpha=0 的区域一眼可辨）。
+class _CheckerPainter extends CustomPainter {
+  const _CheckerPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double cell = 14;
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = const Color(0xFF43434E),
+    );
+    final Paint dark = Paint()..color = const Color(0xFF2C2C34);
+    for (double y = 0; y < size.height; y += cell) {
+      for (double x = 0; x < size.width; x += cell) {
+        final int ix = (x / cell).floor();
+        final int iy = (y / cell).floor();
+        if ((ix + iy).isEven) continue;
+        canvas.drawRect(Rect.fromLTWH(x, y, cell, cell), dark);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 /// 焦点标记：小圆点 + 描边，指示当前"钉住"的层。
