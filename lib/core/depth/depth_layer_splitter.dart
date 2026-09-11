@@ -135,43 +135,15 @@ abstract final class DepthLayerSplitter {
     SubjectMask? subj = subject;
     if (subj != null) {
       final int sw = subj.width;
-      final int sh = subj.height;
-      if (sw > 0 && sh > 0 && w > 0 && h > 0) {
-        final Float32List lowDepth = Float32List(sw * sh);
-        for (int y = 0; y < sh; y++) {
-          final int sy = (y * h ~/ sh).clamp(0, h - 1);
-          final int row = sy * w;
-          for (int x = 0; x < sw; x++) {
-            final int sx = (x * w ~/ sw).clamp(0, w - 1);
-            lowDepth[y * sw + x] = dw[row + sx];
-          }
-        }
-        // mask 外区域的深度中位数 = 背景的典型深度（生长不得低于它）
-        final List<double> bgSamples = <double>[];
-        for (int i = 0; i < subj.data.length; i += 3) {
-          if (subj.data[i] < 0.5) bgSamples.add(lowDepth[i]);
-        }
-        double bgLevel = 0.0;
-        if (bgSamples.isNotEmpty) {
-          bgSamples.sort();
-          bgLevel = bgSamples[bgSamples.length ~/ 2];
-        }
-        subj = SubjectMask(
-          width: sw,
-          height: sh,
-          data: _growByDepth(
-            subj.data,
-            lowDepth,
-            sw,
-            sh,
-            // 容差收紧：只补"与身体深度连续"的部位（腿、手臂）
-            tol: 0.15,
-            // 最多长 mask 宽度的 6% —— 取 12% 时实测会把周围背景一起吞进来
-            maxSteps: math.max(6, (sw * 0.06).round()),
-            // 背景深度水平之上再留一点余量，避免贴着背景蔓延
-            minDepth: bgLevel + 0.06,
-          ),
-        );
+      if (sw > 0) {
+        // ★ 用【形态学闭运算】填补 mask 内部的小缺口，而不是"沿深度生长"。
+        //
+        //   生长试过两版都失败：只看局部深度连续 → 蔓延吞掉周围背景；再加深度
+        //   下限 → 仍然收纳了背景。根本原因是人物周围的背景深度常常和身体接近，
+        //   而"生长"一旦判错就【无法回收】。
+        //   闭运算（先膨胀后腐蚀）只填补凹陷与断裂，不会把整体轮廓推大，参数
+        //   风险小得多 —— 这正是"漏抠的腿"需要的修正。
+        subj = subj.closed(math.max(2, (sw * 0.02).round()));
       }
       if (subjectDilate > 0.5 && photo.width > 0) {
         final SubjectMask s = subj;
@@ -338,6 +310,9 @@ abstract final class DepthLayerSplitter {
   ///
   /// [tol] 相邻像素深度容差（归一化深度单位）；[maxSteps] 最大生长步数；
   /// [minDepth] 深度下限 —— 低于它的像素一律不生长。
+  // ★ 已废弃：实机两版（先纯"局部深度连续"、后加"深度下限"）都会把周围背景
+  //   收纳进主体层。改用 SubjectMask.closed（形态学闭运算）。保留备查。
+  // ignore: unused_element
   static Float32List _growByDepth(
     Float32List mask,
     Float32List depth,

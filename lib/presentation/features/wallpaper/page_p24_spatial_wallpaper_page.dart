@@ -10,7 +10,7 @@
 //   拖拽画面 → 焦点连续跟随手指移动
 //   "自动晃动"开关 → 用正弦轨迹模拟陀螺仪输入（U-08 的 RecordingInputSource 雏形），
 //                    让视差效果无需真实传感器即可看到
-import 'dart:async' show unawaited;
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -73,6 +73,11 @@ class _PageP24SpatialWallpaperPageState
   // ── S-39 主体分割 ────────────────────────────────────────
   /// 主体 mask（随「用 AI 估计深度」一起产出）。为 null → 分层退回纯深度阈值。
   SubjectMask? _subjectMask;
+
+  /// 主体遮罩预览（调试）：把 mask 判定的主体区域染成半透明红叠在画面上。
+  /// 有它才能直接确认"分割到底覆盖了哪里"，不必再靠推理猜。
+  bool _showMask = false;
+  ui.Image? _maskImage;
 
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
@@ -174,6 +179,7 @@ class _PageP24SpatialWallpaperPageState
   @override
   void dispose() {
     _ticker.dispose();
+    _maskImage?.dispose();
     _layerSet?.dispose();
     _depth?.dispose();
     _photo?.dispose();
@@ -275,6 +281,9 @@ class _PageP24SpatialWallpaperPageState
       // ★ S-39：主体分割。不可用/失败 → null，分层自动退回纯深度阈值 ——
       //   分割只负责"让分层更准"，绝不允许它阻断整条链路。
       final SubjectMask? mask = await _runSegmentation(bytes);
+      // 预览图与 mask 同步产出（否则每次切开关都要重算一遍）
+      final ui.Image? maskImg =
+          mask == null ? null : await _maskToImage(mask);
       // ★ 切成图层 —— "分层 + 图层平移"渲染的数据基础
       final ui.Image? photoImg = _photo;
       final DepthLayerSet? set = photoImg == null
@@ -304,6 +313,8 @@ class _PageP24SpatialWallpaperPageState
         // 现在分层由上面的图层切分承担，故置 1 关闭 shader 侧的分层。
         _layers = 1;
         _subjectMask = mask;
+        _maskImage?.dispose();
+        _maskImage = maskImg;
         final String layerInfo = set == null ? '' : ' · ${set.layers.length} 层';
         final String segInfo = mask == null
             ? ' · 无主体分割'
@@ -333,6 +344,31 @@ class _PageP24SpatialWallpaperPageState
       debugPrint('🔴 S-39 分割异常（降级为纯深度分层）: $e');
       return null;
     }
+  }
+
+  /// soft mask → 半透明红色叠加图（供「主体遮罩预览」）。
+  ///
+  /// 用红色而非灰度：叠在原图上时，一眼就能看出"腿在不在里面、背景有没有被
+  /// 收进来" —— 这是调分割参数时唯一可靠的依据。
+  static Future<ui.Image> _maskToImage(SubjectMask m) {
+    final Uint8List rgba = Uint8List(m.length * 4);
+    for (int i = 0; i < m.length; i++) {
+      final int a = (m.data[i].clamp(0.0, 1.0) * 150).round();
+      final int o = i * 4;
+      rgba[o] = 255;
+      rgba[o + 1] = 40;
+      rgba[o + 2] = 40;
+      rgba[o + 3] = a;
+    }
+    final Completer<ui.Image> done = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      rgba,
+      m.width,
+      m.height,
+      ui.PixelFormat.rgba8888,
+      done.complete,
+    );
+    return done.future;
   }
 
   /// 重新应用主体平滑并**重建分层**（无需重新推理）。
@@ -599,6 +635,15 @@ class _PageP24SpatialWallpaperPageState
                           );
                         },
                       ),
+                      // 主体遮罩预览（调试）：红色半透明 = 被判为主体的区域。
+                      // 放在 AnimatedBuilder 之外 —— 它不随晃动重绘。
+                      if (_showMask && _maskImage != null)
+                        IgnorePointer(
+                          child: RawImage(
+                            image: _maskImage,
+                            fit: BoxFit.fill,
+                          ),
+                        ),
                       // 焦点指示器（不拦截手势）
                       IgnorePointer(
                         child: Stack(
@@ -817,6 +862,15 @@ class _PageP24SpatialWallpaperPageState
             summary: '显示深度图而非成片（调试）',
             value: _showDepth,
             onChanged: (bool v) => setState(() => _showDepth = v),
+            insideMargin: _itemMargin,
+          ),
+          MiuixSwitchPreference(
+            title: '主体遮罩预览',
+            summary: _subjectMask == null
+                ? '（需先点「用 AI 估计深度」）'
+                : '红色 = 被判为主体的区域（调试）',
+            value: _showMask,
+            onChanged: (bool v) => setState(() => _showMask = v),
             insideMargin: _itemMargin,
           ),
 

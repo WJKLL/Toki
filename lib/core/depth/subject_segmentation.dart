@@ -102,6 +102,49 @@ class SubjectMask {
     return SubjectMask(width: width, height: height, data: out);
   }
 
+  /// 形态学腐蚀（与 [dilated] 对偶：取邻域最小值）。
+  SubjectMask eroded(int radius) {
+    if (radius <= 0) return this;
+    final int r = radius.clamp(0, 64);
+    final Float32List tmp = Float32List(data.length);
+    for (int y = 0; y < height; y++) {
+      final int base = y * width;
+      for (int x = 0; x < width; x++) {
+        double m = 1.0;
+        final int x0 = math.max(0, x - r);
+        final int x1 = math.min(width - 1, x + r);
+        for (int k = x0; k <= x1; k++) {
+          final double v = data[base + k];
+          if (v < m) m = v;
+        }
+        tmp[base + x] = m;
+      }
+    }
+    final Float32List out = Float32List(data.length);
+    for (int y = 0; y < height; y++) {
+      final int y0 = math.max(0, y - r);
+      final int y1 = math.min(height - 1, y + r);
+      for (int x = 0; x < width; x++) {
+        double m = 1.0;
+        for (int k = y0; k <= y1; k++) {
+          final double v = tmp[k * width + x];
+          if (v < m) m = v;
+        }
+        out[y * width + x] = m;
+      }
+    }
+    return SubjectMask(width: width, height: height, data: out);
+  }
+
+  /// 形态学闭运算（先膨胀后腐蚀）：填补 mask 内部的凹陷与断裂。
+  ///
+  /// ★ 与 [dilated] 的关键区别
+  ///   膨胀会把整体轮廓**推大**，推出去的那一圈会带着周围背景一起动；
+  ///   闭运算的腐蚀会把推大的部分收回来，**只留下"缝隙被填上"的效果**。
+  ///   这正是"分割模型漏抠身体某一段"所需要的修正，而不会把背景收进来。
+  SubjectMask closed(int radius) =>
+      radius <= 0 ? this : dilated(radius).eroded(radius);
+
   /// 双线性重采样到 [w]×[h]。
   ///
   /// 供 DepthLayerSplitter 对齐到它自己的工作尺寸用 —— mask 是软概率，
