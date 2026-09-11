@@ -163,17 +163,29 @@ class _ComposePainter extends CustomPainter {
       return (idx - focusLayer) / span;
     }
 
+    // ★ 视野放大倍率：位移会让层边缘取到纹理之外 —— 不处理就直接露出页面
+    //   底色（实测反馈"空间图还是会露出底图"）。放大后等效于给每层补了
+    //   margin：位移时画面边缘仍落在层图内部，既不露底、也没有边缘像素被
+    //   拉伸的糊边。代价是四周各裁掉一点视野，裁多少随位移自动增大。
+    //   2× 是因为位移系数有正有负（最远层 −1、最近层 +1）。
+    final double amountPx = amount * devicePixelRatio;
+    final double minSide = math.min(wPx, hPx);
+    final double zoom = minSide <= 1.0
+        ? 1.0
+        : 1.0 + 2.0 * amountPx / minSide;
+
     shader
       ..setFloat(0, wPx) // uSize.x
       ..setFloat(1, hPx) // uSize.y
       ..setFloat(2, shift.dx) // uShift.x
       ..setFloat(3, shift.dy) // uShift.y
-      ..setFloat(4, amount * devicePixelRatio) // uAmount
+      ..setFloat(4, amountPx) // uAmount
       ..setFloat(5, coefOf(0)) // uCoefs.x
       ..setFloat(6, coefOf(1)) // uCoefs.y
       ..setFloat(7, coefOf(2)) // uCoefs.z
       ..setFloat(8, coefOf(3)) // uCoefs.w
       ..setFloat(9, count.toDouble()) // uCount
+      ..setFloat(10, zoom) // uZoom（视野放大，替代 margin）
       // 四个 sampler 恒绑定（层数不足时用相邻层占位），
       // 否则 Skia 会因缺 sampler 判定整个 shader 失效。
       ..setImageSampler(0, imageOf(0))
