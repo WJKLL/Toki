@@ -25,6 +25,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 
 import 'depth_inference.dart';
+import 'subject_segmentation.dart';
 
 /// 一个视差图层。
 class DepthLayer {
@@ -69,6 +70,9 @@ abstract final class DepthLayerSplitter {
     required ui.Image photo,
     required DepthResult depth,
     int layerCount = 2,
+    // ★ 主体 mask（S-39）。非空时**强制 2 层**且层归属由它决定，不再按深度切；
+    //   为空则退回原来的 Otsu 深度分层 —— 这是分割模型不可用/失败时的降级路径。
+    SubjectMask? subject,
     // ⚠️ 羽化宽度必须【近乎为零】，这是本方案最容易踩的坑：
     //    层边界处只要有像素被两层 alpha 同时覆盖，它就会被两层内容半透明叠加，
     //    而两层位移不同 → 双影 + 对比度下降。用户实测表现："AI 计算后渲染的
@@ -100,6 +104,19 @@ abstract final class DepthLayerSplitter {
 
     final Uint8List src = await _rgbaOf(photo, w, h);
     final Float32List dw = _resampleDepth(depth, w, h);
+
+    // ★ 主体 mask（S-39）：语义来源，优先于深度阈值。
+    //
+    //   为什么必须优先：深度只回答"远近"，回答不了"这是不是人"。实测插画上
+    //   浅蓝格子裙被估成 2.52 m（比画面右侧背景柱子的 2.14 m 还远），纯深度
+    //   阈值的等深线会横穿人体 —— 一小半身体被切进背景层，跟着背景一起动
+    //   （用户实测："躯干和背后的背景混成同一层"）。反过来，前景柱子虽然离
+    //   相机近，却会因此被 Otsu 判成主体。mask 同时修正这两个方向。
+    //
+    //   有 mask → 强制 2 层：层 0 = 背景（mask 外），层 1 = 主体（mask 内）。
+    //   没 mask → 原逻辑（Otsu + 累积 alpha + 深度归属）。
+    final Float32List? mw = subject?.resample(w, h);
+    if (mw != null) layerCount = 2;
 
     // ★ 2 层时的切点用 Otsu 自动求，而不是固定 0.5 等分。
     //   等分的边界会【横穿背景】（实测："背景被分割"、树干断裂）——
@@ -181,13 +198,23 @@ abstract final class DepthLayerSplitter {
       final Uint8List rgba = Uint8List(w * h * 4);
       bool any = false;
       for (int p = 0; p < w * h; p++) {
-        final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
-        final double a = aOf[bi];
+        final double a;
+        final double own;
+        if (mw != null) {
+          // ── 有语义 mask：层 0 = 背景（alpha 恒 1 铺底，own = 1−m），
+          //    层 1 = 主体（alpha = m，own = m）。
+          //    mask 内即使深度被模型估偏，也一定进主体层；mask 外的前景柱子
+          //    则稳稳留在背景层。
+          final double m = mw[p];
+          a = i == 0 ? 1.0 : m;
+          own = i == 0 ? 1.0 - m : m;
+        } else {
+          final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
+          a = aOf[bi];
+          // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
+          own = aNext == null ? a : (a - aNext[bi]).clamp(0.0, 1.0);
+        }
         if (a <= 0.0) continue; // 本层不覆盖这里 → 留全透明，合成时无影响
-        // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
-        final double own = aNext == null
-            ? a
-            : (a - aNext[bi]).clamp(0.0, 1.0);
         final int o = p * 4;
         // 本层区域用原图，其余用模糊版：避免平移后露出错位的其它层内容。
         rgba[o] = (src[o] * own + soft[o] * (1.0 - own)).round().clamp(0, 255);

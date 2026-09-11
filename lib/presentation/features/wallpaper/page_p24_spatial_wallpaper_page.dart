@@ -24,6 +24,8 @@ import '../../../core/depth/depth_inference.dart';
 import '../../../core/depth/depth_layer_splitter.dart';
 import '../../../core/depth/depth_post_process.dart';
 import '../../../core/depth/onnx_depth_inference.dart';
+import '../../../core/depth/onnx_subject_segmentation.dart';
+import '../../../core/depth/subject_segmentation.dart';
 import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/wallpaper/depth_template_renderer.dart';
 import '../../../domain/entities/depth_template.dart';
@@ -67,6 +69,10 @@ class _PageP24SpatialWallpaperPageState
 
   /// AI 原始推理结果（保留一份：调「主体平滑」时无需重新推理）。
   DepthResult? _aiResult;
+
+  // ── S-39 主体分割 ────────────────────────────────────────
+  /// 主体 mask（随「用 AI 估计深度」一起产出）。为 null → 分层退回纯深度阈值。
+  SubjectMask? _subjectMask;
 
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
@@ -155,6 +161,9 @@ class _PageP24SpatialWallpaperPageState
     // S-31：注册 ONNX 实现。鸿蒙不注册 → isAvailable() 为 false →
     // 页面自动停留在预设景深模板，不会抛异常。
     DepthInferenceRegistry.register(OnnxDepthInference.instance);
+    // S-39：注册主体分割实现。鸿蒙不注册 → Registry.instance 为 null →
+    // DepthLayerSplitter 自动退回纯深度分层，页面不抛异常。
+    SubjectSegmentationRegistry.register(OnnxSubjectSegmentation.instance);
     _ticker = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4200),
@@ -198,6 +207,8 @@ class _PageP24SpatialWallpaperPageState
         _photoBytes = f.bytes;
         _aiDepth = false;
         _aiInfo = '';
+        // 换图 → 上一张的主体 mask 立即失效，避免套用到新图的人身上。
+        _subjectMask = null;
         _layerSet?.dispose();
         _layerSet = null;
       });
@@ -243,7 +254,7 @@ class _PageP24SpatialWallpaperPageState
     if (bytes == null || _aiBusy) return;
     setState(() {
       _aiBusy = true;
-      _aiInfo = 'AI 推理中…';
+      _aiInfo = 'AI 推理中（深度 + 主体分割）…';
     });
     final Stopwatch sw = Stopwatch()..start();
     try {
@@ -261,6 +272,9 @@ class _PageP24SpatialWallpaperPageState
       }
       final DepthResult smoothed = DepthPostProcess.smooth(r, _smooth);
       final ui.Image img = await smoothed.toImage();
+      // ★ S-39：主体分割。不可用/失败 → null，分层自动退回纯深度阈值 ——
+      //   分割只负责"让分层更准"，绝不允许它阻断整条链路。
+      final SubjectMask? mask = await _runSegmentation(bytes);
       // ★ 切成图层 —— "分层 + 图层平移"渲染的数据基础
       final ui.Image? photoImg = _photo;
       final DepthLayerSet? set = photoImg == null
@@ -269,6 +283,7 @@ class _PageP24SpatialWallpaperPageState
               photo: photoImg,
               depth: smoothed,
               layerCount: _layerCount,
+              subject: mask,
             );
       if (!mounted) {
         img.dispose();
@@ -285,15 +300,35 @@ class _PageP24SpatialWallpaperPageState
         // shader 侧的「深度分层」对 AI 深度图有害（会按等深线切出可见边界）。
         // 现在分层由上面的图层切分承担，故置 1 关闭 shader 侧的分层。
         _layers = 1;
+        _subjectMask = mask;
         final String layerInfo = set == null ? '' : ' · ${set.layers.length} 层';
+        final String segInfo = mask == null
+            ? ' · 无主体分割'
+            : ' · 主体 ${(mask.coverage * 100).round()}%';
         _aiInfo = 'AI 深度 · ${sw.elapsedMilliseconds} ms · '
             '${r.minMeters.toStringAsFixed(2)}~'
-            '${r.maxMeters.toStringAsFixed(2)} m$layerInfo';
+            '${r.maxMeters.toStringAsFixed(2)} m$layerInfo$segInfo';
       });
     } catch (e) {
       if (mounted) setState(() => _aiInfo = '异常：$e');
     } finally {
       if (mounted) setState(() => _aiBusy = false);
+    }
+  }
+
+  /// S-39：跑一次主体分割。
+  ///
+  /// 未注册（鸿蒙未注入实现）或任何异常 → 返回 null，调用方降级为纯深度分层。
+  /// 不做结果缓存：同一张图重复点「用 AI 估计深度」本就要重算深度，分割顺带
+  /// 重跑的代价（真人只需 1 次推理）可以接受，换来的是实现简单、状态更少。
+  Future<SubjectMask?> _runSegmentation(Uint8List bytes) async {
+    final SubjectSegmentation? seg = SubjectSegmentationRegistry.instance;
+    if (seg == null) return null;
+    try {
+      return await seg.segment(bytes);
+    } catch (e) {
+      debugPrint('🔴 S-39 分割异常（降级为纯深度分层）: $e');
+      return null;
     }
   }
 
@@ -310,6 +345,8 @@ class _PageP24SpatialWallpaperPageState
         photo: photo,
         depth: smoothed,
         layerCount: _layerCount,
+        // 复用导入时算好的主体 mask —— 调「主体平滑/分层数」不必重跑分割。
+        subject: _subjectMask,
       );
       if (!mounted) {
         img.dispose();

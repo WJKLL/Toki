@@ -102,6 +102,15 @@ flutter:
     - assets/images/app_icon.png
     # v1.52.0（S-31 空间壁纸）：端侧深度模型（YOLO26-n depth，FP16 dynamic，约 10 MB）
     - assets/models/yolo26n-depth_fp16.onnx
+    # v1.53.0（S-39 主体分割）：与深度分层配合 —— 深度只能回答"远近"，回答不了
+    #   "这是不是人"：实测插画上浅蓝格子裙被估成 2.52m（比背景柱子的 2.14m 还远），
+    #   而前景柱子又会被判成主体。用分割 mask 约束层归属可一次解决两者。
+    #   · isnet-anime_int8（42MB）：插画人像专用；实测 int8 量化几乎无损
+    #   · modnet（25MB）：真人专用；实测 int8 会明显退化，故保持 fp32
+    #   ⚠️ isnet-anime 输入硬编码 1024×1024（decoder 的 skip 连接尺寸烘焙死在图里，
+    #      改动态输入会在 Concat 处报维度不匹配），不能降到 512。
+    - assets/models/isnet-anime_int8.onnx
+    - assets/models/modnet.onnx
     # OH 引擎 LTPO 帧率投票开关(SWITCH 0 = 关闭投票,跟随系统设置);
     # Android/Web 忽略此文件。
     - framesconfig.json
