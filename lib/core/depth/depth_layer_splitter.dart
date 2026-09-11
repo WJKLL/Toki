@@ -126,11 +126,45 @@ abstract final class DepthLayerSplitter {
     //     实测表现就是"背景不是一体的、移动时一块一块"。膨胀后主体层的覆盖
     //     范围外扩同样的距离，正好把滑出来的填充重新盖住；而膨胀区显示的是
     //     原图内容，因此视觉上完全看不出被扩大过。
+    // ★ 先用【深度】把 mask 补全，再膨胀。
+    //
+    //   补全：分割模型漏抠的身体部位（实测："人物右腿背景无法分开"）会掉进
+    //   背景层跟着背景动；以 mask 为种子沿深度连续方向生长即可补回。
+    //   生长判断只需要粗深度，按 mask 分辨率降采样后做，比在工作尺寸上快
+    //   一个数量级（mask 典型 561×1024，工作尺寸 1440×2600）。
     SubjectMask? subj = subject;
-    if (subj != null && subjectDilate > 0.5 && photo.width > 0) {
-      final SubjectMask s = subj;
-      // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
-      subj = s.dilated((subjectDilate * s.width / photo.width).round());
+    if (subj != null) {
+      final int sw = subj.width;
+      final int sh = subj.height;
+      if (sw > 0 && sh > 0 && w > 0 && h > 0) {
+        final Float32List lowDepth = Float32List(sw * sh);
+        for (int y = 0; y < sh; y++) {
+          final int sy = (y * h ~/ sh).clamp(0, h - 1);
+          final int row = sy * w;
+          for (int x = 0; x < sw; x++) {
+            final int sx = (x * w ~/ sw).clamp(0, w - 1);
+            lowDepth[y * sw + x] = dw[row + sx];
+          }
+        }
+        subj = SubjectMask(
+          width: sw,
+          height: sh,
+          data: _growByDepth(
+            subj.data,
+            lowDepth,
+            sw,
+            sh,
+            tol: 0.22,
+            // 最多长到 mask 宽度的 12%（约等于原图里"腿离躯干"的量级）
+            maxSteps: math.max(8, (sw * 0.12).round()),
+          ),
+        );
+      }
+      if (subjectDilate > 0.5 && photo.width > 0) {
+        final SubjectMask s = subj;
+        // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
+        subj = s.dilated((subjectDilate * s.width / photo.width).round());
+      }
     }
     final Float32List? mw = subj?.resample(w, h);
     if (mw != null) layerCount = 2;
@@ -273,6 +307,65 @@ abstract final class DepthLayerSplitter {
       workHeight: h,
       margin: margin,
     );
+  }
+
+  /// 以 mask 为**种子**、沿【深度连续】方向生长，把分割模型漏抠的身体部位补回来。
+  ///
+  /// ★ 为什么需要（实测："人物右腿背景无法分开"）
+  ///   分割模型对身体边缘部位（被遮挡的腿、与背景配色接近的衣物）经常漏抠。
+  ///   漏掉的部分会掉进背景层、跟着背景一起动 —— 用户看到的就是"腿和背景分不开"。
+  ///   但深度信息还在：腿与躯干的深度是连续的，而腿与背景之间有台阶。
+  ///
+  /// ★ 为什么这次能成，而早先的"单点种子区域生长"不行
+  ///   那次以**一个点**为种子、用全局梯度阈值判断，实测阈值从 0.028 到 0.065
+  ///   就从"几乎不长"直接跳到"泄漏 84%"，中间没有稳定区间（深度图是软的，
+  ///   梯度不够锐利）。这次种子是**整片语义 mask**（几乎不会误判），判据换成
+  ///   更稳的"相邻像素深度差"，并额外用 [maxSteps] 限制生长距离，因此不会
+  ///   顺着平坦的背景一路蔓延出去。
+  ///
+  /// [tol] 相邻像素深度容差（归一化深度单位）；[maxSteps] 最大生长步数。
+  static Float32List _growByDepth(
+    Float32List mask,
+    Float32List depth,
+    int w,
+    int h, {
+    required double tol,
+    required int maxSteps,
+  }) {
+    final Float32List out = Float32List(mask.length);
+    final Int32List dist = Int32List(mask.length);
+    final Int32List queue = Int32List(mask.length);
+    int head = 0;
+    int tail = 0;
+
+    for (int i = 0; i < mask.length; i++) {
+      if (mask[i] > 0.5) {
+        out[i] = 1.0;
+        dist[i] = 1;
+        queue[tail++] = i;
+      }
+    }
+
+    while (head < tail) {
+      final int i = queue[head++];
+      final int step = dist[i];
+      if (step >= maxSteps) continue;
+      final int y = i ~/ w;
+      final int x = i - y * w;
+      final double di = depth[i];
+      for (int d = 0; d < 4; d++) {
+        final int nx = x + (d == 0 ? -1 : (d == 1 ? 1 : 0));
+        final int ny = y + (d == 2 ? -1 : (d == 3 ? 1 : 0));
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        final int n = ny * w + nx;
+        if (dist[n] != 0) continue;
+        if ((depth[n] - di).abs() > tol) continue;
+        dist[n] = step + 1;
+        out[n] = 1.0;
+        queue[tail++] = n;
+      }
+    }
+    return out;
   }
 
   static double _smoothstep(double e0, double e1, double x) {
