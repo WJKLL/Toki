@@ -284,6 +284,9 @@ class _PageP24SpatialWallpaperPageState
               depth: smoothed,
               layerCount: _layerCount,
               subject: mask,
+              // 膨胀量 = 层间位移差：背景层比主体层多走的距离，正好等于背景层
+              // 里那片填充会滑出主体轮廓的距离。
+              subjectDilate: _layerDelta,
             );
       if (!mounted) {
         img.dispose();
@@ -347,6 +350,7 @@ class _PageP24SpatialWallpaperPageState
         layerCount: _layerCount,
         // 复用导入时算好的主体 mask —— 调「主体平滑/分层数」不必重跑分割。
         subject: _subjectMask,
+        subjectDilate: _layerDelta,
       );
       if (!mounted) {
         img.dispose();

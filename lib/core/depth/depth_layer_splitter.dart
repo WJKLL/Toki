@@ -73,6 +73,11 @@ abstract final class DepthLayerSplitter {
     // ★ 主体 mask（S-39）。非空时**强制 2 层**且层归属由它决定，不再按深度切；
     //   为空则退回原来的 Otsu 深度分层 —— 这是分割模型不可用/失败时的降级路径。
     SubjectMask? subject,
+    // ★ 主体 mask 的膨胀量（**原图逻辑像素**，调用方通常传"层间位移差"）。
+    //   背景层的位移比主体层大，背景层里那片"填充内容"会滑到主体轮廓之外，
+    //   露出来就是"一块一块"。把主体层的覆盖范围外扩同样的距离即可盖住它 ——
+    //   而膨胀区显示的是【原图】内容，所以看不出被扩大过。
+    double subjectDilate = 0,
     // ⚠️ 羽化宽度必须【近乎为零】，这是本方案最容易踩的坑：
     //    层边界处只要有像素被两层 alpha 同时覆盖，它就会被两层内容半透明叠加，
     //    而两层位移不同 → 双影 + 对比度下降。用户实测表现："AI 计算后渲染的
@@ -115,7 +120,19 @@ abstract final class DepthLayerSplitter {
     //
     //   有 mask → 强制 2 层：层 0 = 背景（mask 外），层 1 = 主体（mask 内）。
     //   没 mask → 原逻辑（Otsu + 累积 alpha + 深度归属）。
-    final Float32List? mw = subject?.resample(w, h);
+    //
+    //   ★ 还要把 mask【膨胀】一个"层间位移差"：
+    //     背景层位移比主体层大，背景层里那片填充会滑到主体轮廓之外露出来 ——
+    //     实测表现就是"背景不是一体的、移动时一块一块"。膨胀后主体层的覆盖
+    //     范围外扩同样的距离，正好把滑出来的填充重新盖住；而膨胀区显示的是
+    //     原图内容，因此视觉上完全看不出被扩大过。
+    SubjectMask? subj = subject;
+    if (subj != null && subjectDilate > 0.5 && photo.width > 0) {
+      final SubjectMask s = subj;
+      // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
+      subj = s.dilated((subjectDilate * s.width / photo.width).round());
+    }
+    final Float32List? mw = subj?.resample(w, h);
     if (mw != null) layerCount = 2;
 
     // ★ 2 层时的切点用 Otsu 自动求，而不是固定 0.5 等分。
@@ -201,13 +218,23 @@ abstract final class DepthLayerSplitter {
         final double a;
         final double own;
         if (mw != null) {
-          // ── 有语义 mask：层 0 = 背景（alpha 恒 1 铺底，own = 1−m），
-          //    层 1 = 主体（alpha = m，own = m）。
-          //    mask 内即使深度被模型估偏，也一定进主体层；mask 外的前景柱子
-          //    则稳稳留在背景层。
+          // ── 有语义 mask 的 2 层 ──
+          //
+          // 层 1（主体）：alpha = 膨胀后的 mask，**own = 1（整层原图）**。
+          //   own 必须恒为 1：若按 mask 值混合，mask 边缘的 RGB 会被填充色污染，
+          //   合成后就是一圈肉眼可见的"描边"（实测反馈："人物主体渲染还多了描边"）。
+          //   两层 RGB 都取自原图时，边缘的 mix 结果仍等于原图，描边自然消失。
+          //   又因为 RGB 是原图，膨胀区显示的就是原图内容 —— 扩多大都不穿帮。
+          //
+          // 层 0（背景）：alpha 恒 1 铺底；own = 1 − steep(mask)，即 mask 深处
+          //   用填充（那片区域本来会被主体盖住，存原图会让"另一个主体"在位移后
+          //   露出来），mask 外一律用原图。过渡用较陡的 smoothstep(0.35,0.65)，
+          //   把"原图↔填充"的混合带压窄，进一步减少边缘色差。
           final double m = mw[p];
           a = i == 0 ? 1.0 : m;
-          own = i == 0 ? 1.0 - m : m;
+          own = i == 0
+              ? 1.0 - _smoothstep(0.35, 0.65, m)
+              : 1.0;
         } else {
           final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
           a = aOf[bi];

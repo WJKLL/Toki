@@ -58,6 +58,50 @@ class SubjectMask {
     return data[y * width + x];
   }
 
+  /// 形态学膨胀（返回新 mask）—— 把主体覆盖范围外扩 [radius] 像素。
+  ///
+  /// ★ 为什么要扩：
+  ///   背景层的位移比主体层大，背景层里那片"填充内容"会滑到主体轮廓之外
+  ///   露出来 —— 实测表现就是"背景不是一体的、移动时一块一块"。先把 mask
+  ///   扩出去，滑出来的填充就被主体层重新盖住；而主体层的 RGB 恒为原图，
+  ///   所以扩大覆盖范围在视觉上完全无代价。
+  ///
+  /// 在 mask 自己的分辨率上做（典型 561×1024，比工作尺寸 1440×2600 小一个
+  /// 数量级），比放到工作尺寸上做快得多。
+  SubjectMask dilated(int radius) {
+    if (radius <= 0) return this;
+    final int r = radius.clamp(0, 64);
+    // 可分离膨胀：先横后纵，各取 (2r+1) 窗口的最大值。
+    final Float32List tmp = Float32List(data.length);
+    for (int y = 0; y < height; y++) {
+      final int base = y * width;
+      for (int x = 0; x < width; x++) {
+        double m = 0;
+        final int x0 = math.max(0, x - r);
+        final int x1 = math.min(width - 1, x + r);
+        for (int k = x0; k <= x1; k++) {
+          final double v = data[base + k];
+          if (v > m) m = v;
+        }
+        tmp[base + x] = m;
+      }
+    }
+    final Float32List out = Float32List(data.length);
+    for (int y = 0; y < height; y++) {
+      final int y0 = math.max(0, y - r);
+      final int y1 = math.min(height - 1, y + r);
+      for (int x = 0; x < width; x++) {
+        double m = 0;
+        for (int k = y0; k <= y1; k++) {
+          final double v = tmp[k * width + x];
+          if (v > m) m = v;
+        }
+        out[y * width + x] = m;
+      }
+    }
+    return SubjectMask(width: width, height: height, data: out);
+  }
+
   /// 双线性重采样到 [w]×[h]。
   ///
   /// 供 DepthLayerSplitter 对齐到它自己的工作尺寸用 —— mask 是软概率，
