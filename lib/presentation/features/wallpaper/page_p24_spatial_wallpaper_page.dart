@@ -83,24 +83,32 @@ class _PageP24SpatialWallpaperPageState
   DepthTemplate _template = DepthTemplate.presets.first;
   Offset _focusUv = const Offset(0.5, 0.5);
   double _focus = 0.5; // 焦点深度（0 = 最远，1 = 最近）
-  /// 视差强度（逻辑像素）—— 作用在【最远层】上的最大位移。
+  /// 相邻层的位移差（逻辑像素）—— **这才是真正被控制的量**。
   ///
-  /// ⚠️ **已锁定，不向用户开放调整**（实测结论）。
+  ///   "看得出来"和"露瑕疵"是同一个量的两面，但敏感度不同：
+  ///     · 看得出来：主要靠【背景的绝对位移】—— 背景整片在动，人就感知到了；
+  ///     · 露瑕疵：只取决于【层间差】—— 错位带有多宽。
+  ///   所以策略是"保住背景位移、压低层间差"：主体多跟一点即可。
   ///
-  ///   原因：穿帮带宽 = 相邻层的位移差。位移越大，主体轮廓外露出的错位内容
-  ///   越宽 —— 实测只要把这项交给用户，就一定会被调到穿帮的位置。而"克制"
-  ///   本身就是市面成熟空间壁纸的共识（苹果空间照片的位移同样是收着的）。
+  ///     · 层间差 < 3px：分层看不出，空间感出不来；
+  ///     · 层间差 > 8px：主体轮廓外错位的那一条开始显眼。
+  ///   取 5px 作平衡点 —— 空间感清楚；再配合背景色扩散填充（错位带里露出的
+  ///   本来就是背景的延续），边界几乎看不出。
   ///
-  ///   10px 在 380dp 宽的屏上约 2.6%；配合 [_subjectRatio] = 0.25 后，层间差
-  ///   只有 7.5px，空间感清楚且不穿帮。
-  static const double _amount = 10;
+  ///   注意：实际层间差 = 总位移 ×(1 − subjectRatio)/(层数 − 1)，所以这里锁定
+  ///   的是【层间差】而不是【总位移】—— 2/3/4 层下的观感才能一致（层数越多，
+  ///   单层位移与总位移都按比例缩小）。
+  static const double _layerDelta = 5.0;
 
-  /// 主体（最近层）位移占 [_amount] 的比例。
+  /// 最远层的位移上限（逻辑像素）—— 防止层数多时总幅度失控。
+  static const double _amountMax = 14.0;
+
+  /// 主体（最近层）位移占最远层的比例。
   ///
-  /// 0.25 = 主体**跟着动，但幅度只有背景的四分之一** —— 这就是"晃动时主体
-  /// 还有一点立体感"（对齐苹果空间照片的观感），同时把层间差压到
-  /// 0.75 × _amount。取 0（主体钉死）会变成旧的反向模型，层间差拉满、穿帮明显。
-  static const double _subjectRatio = 0.25;
+  /// 0.5 = 主体**跟着动，但幅度只有背景的一半** —— 这就是"晃动时主体还有一点
+  /// 立体感"（对齐苹果空间照片）。取 0 会退化成旧的"主体钉死"反向模型：层间差
+  /// 被拉满、穿帮明显，而且主体完全没有立体感。
+  static const double _subjectRatio = 0.5;
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -476,6 +484,14 @@ class _PageP24SpatialWallpaperPageState
           child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c) {
               final Size size = c.biggest;
+              // ★ 由【目标层间差】反推总位移：层间差 = 总位移×(1−ratio)/(层数−1)。
+              //   锁定层间差而不是总位移，2/3/4 层下的观感才一致；_amountMax 兜住
+              //   层数多时总幅度失控的情况。
+              final int layerN = math.max(2, _layerSet?.layers.length ?? 2);
+              final double motionAmount = math.min(
+                _layerDelta * (layerN - 1) / (1.0 - _subjectRatio),
+                _amountMax,
+              );
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
                 child: GestureDetector(
@@ -501,14 +517,14 @@ class _PageP24SpatialWallpaperPageState
                               ? LayeredParallaxView(
                                   layerSet: set,
                                   shift: shift,
-                                  amount: _amount,
+                                  amount: motionAmount,
                                   subjectRatio: _subjectRatio,
                                 )
                               : ParallaxView(
                                   image: photo,
                                   depth: depth,
                                   shift: shift,
-                                  amount: _amount,
+                                  amount: motionAmount,
                                   focus: _focus,
                                   showDepth: _showDepth,
                                   depthGamma: _gamma,
@@ -526,7 +542,7 @@ class _PageP24SpatialWallpaperPageState
                                 components: _components,
                                 size: size,
                                 shift: shift,
-                                amount: _amount,
+                                amount: motionAmount,
                                 tiltFollow: _tiltFollow,
                                 selectedId: _selectedId,
                                 onSelect: (String id) =>
@@ -649,8 +665,8 @@ class _PageP24SpatialWallpaperPageState
           //   主体轮廓外露出的错位内容越宽。交给用户调就一定会被调到穿帮的位置，
           //   故改为固定值 _amount，并由 _subjectRatio 保证"主体跟着动、幅度小"。
           MiuixText(
-            '视差强度固定 ${_amount.round()} px · 主体占 '
-            '${(_subjectRatio * 100).round()}%（已锁定：可调会让主体边缘穿帮）',
+            '晃动幅度已锁定：层间位移差 ${_layerDelta.round()} px · '
+            '主体占背景的 ${(_subjectRatio * 100).round()}%',
             style: MiuixTheme.of(context).textStyles.body2,
             color: colors.onSurfaceVariantSummary,
           ),
@@ -831,7 +847,7 @@ class _PageP24SpatialWallpaperPageState
         title: '视差系数',
         summary: c.parallax.abs() < 0.005
             ? '0 —— 完全固定（时钟不随晃动移动）'
-            : '${c.parallax.toStringAsFixed(2)} × ${_amount.round()}px',
+            : '${c.parallax.toStringAsFixed(2)} × 画面晃动幅度',
         value: c.parallax,
         min: -1,
         max: 1,
