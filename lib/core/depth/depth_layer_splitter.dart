@@ -147,8 +147,9 @@ abstract final class DepthLayerSplitter {
         // ① 闭运算：填补 mask 内部的凹陷与断裂（不推大整体轮廓）。
         subj = subj.closed(math.max(2, (sw * 0.02).round()));
 
-        // ② ★ 深度一致性过滤：剔掉"mask 说是主体、深度却属于背景"的误判块。
-        //    实测主体层素材里含着一片实心背景（树荫/路面），正是这类误判。
+        // ② ★ 深度连通筛选：剔掉"与身体之间隔着深度台阶"的误判块
+        //    （实测那片实心背景就是它），同时保住手指/手臂这类与身体
+        //    深度连续的边缘部位（全局阈值会把它们误剔）。
         //    按 mask 分辨率降采样深度即可（判断不需要高精度）。
         final Float32List lowDepth = Float32List(sw * sh);
         for (int y = 0; y < sh; y++) {
@@ -162,7 +163,16 @@ abstract final class DepthLayerSplitter {
         subj = SubjectMask(
           width: sw,
           height: sh,
-          data: _depthConsistency(subj.data, lowDepth),
+          data: _keepConnected(
+            subj.data,
+            lowDepth,
+            sw,
+            sh,
+            // 相邻深度容差：略宽松，手指与手掌之间本身也有深度跳变
+            tol: 0.15,
+            // 种子 = mask 核心区域（高置信度的那部分）
+            seedMin: 0.75,
+          ),
         );
       }
       if (subjectDilate > 0.5 && photo.width > 0) {
@@ -315,7 +325,67 @@ abstract final class DepthLayerSplitter {
     );
   }
 
+  /// 在 mask 内部做【深度连通】筛选：只保留与核心区域深度连续地连通的像素。
+  ///
+  /// ★ 为什么从"全局阈值"换成"连通性"（实测："手指被分割了一点"）
+  ///   [_depthConsistency] 用的是全局判据 —— 比核心中位数远 0.18 就剔。
+  ///   这对误判的背景块有效，但会误伤身体的边缘部位：手指、手臂这类细长结构
+  ///   深度估计噪声大，很容易越线，于是被整段切掉。
+  ///
+  ///   而两者的真正区别不在"深度绝对值"，而在【与身体是否深度连续地相连】：
+  ///     · 手指/手臂 —— 与手掌、躯干之间深度是渐变的 → 保留；
+  ///     · 误判背景块 —— 与人体之间隔着深度台阶  → 剔除。
+  ///   于是改为在 mask 内部从核心区域做 BFS，只走"局部深度连续"的邻居。
+  ///
+  /// [tol] 相邻像素深度容差；[seedMin] 作为种子的 mask 核心阈值。
+  static Float32List _keepConnected(
+    Float32List mask,
+    Float32List depth,
+    int w,
+    int h, {
+    required double tol,
+    required double seedMin,
+  }) {
+    final Float32List out = Float32List(mask.length);
+    final Int32List seen = Int32List(mask.length);
+    final Int32List queue = Int32List(mask.length);
+    int head = 0;
+    int tail = 0;
+
+    for (int i = 0; i < mask.length; i++) {
+      if (mask[i] >= seedMin) {
+        out[i] = mask[i];
+        seen[i] = 1;
+        queue[tail++] = i;
+      }
+    }
+    if (tail == 0) return mask; // 没有核心区域 → 不动它，交给后续陡化处理
+
+    while (head < tail) {
+      final int i = queue[head++];
+      final int y = i ~/ w;
+      final int x = i - y * w;
+      final double di = depth[i];
+      for (int d = 0; d < 4; d++) {
+        final int nx = x + (d == 0 ? -1 : (d == 1 ? 1 : 0));
+        final int ny = y + (d == 2 ? -1 : (d == 3 ? 1 : 0));
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        final int n = ny * w + nx;
+        if (seen[n] != 0) continue;
+        if (mask[n] <= 0.0) continue; // 只在 mask 内部走（不外扩）
+        if ((depth[n] - di).abs() > tol) continue; // 必须与邻居深度连续
+        seen[n] = 1;
+        out[n] = mask[n];
+        queue[tail++] = n;
+      }
+    }
+    return out;
+  }
+
   /// 把"mask 判为主体、但深度明显属于背景"的像素剔掉。
+  ///
+  /// 已被 [_keepConnected] 取代：全局阈值会误伤手指/手臂这类深度噪声大的
+  /// 边缘部位（实测："手指被分割了一点"）。保留备查。
   ///
   /// ★ 为什么需要（实测：主体层素材截图）
   ///   主体层素材里，人物之外还含着一片实心不透明的背景（树荫/路面）——
@@ -326,6 +396,7 @@ abstract final class DepthLayerSplitter {
   ///   生长只增不减、一旦蔓延无法回收（试了两版都失败）。这里只减不增：
   ///   以 mask 核心区域（>0.75）的深度中位数为基准，明显更远的像素一律剔出。
   ///   人体各部位（腿、手臂）与躯干深度接近，不会被误伤。
+  // ignore: unused_element
   static Float32List _depthConsistency(
     Float32List mask,
     Float32List depth,
