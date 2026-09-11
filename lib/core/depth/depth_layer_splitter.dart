@@ -146,6 +146,16 @@ abstract final class DepthLayerSplitter {
             lowDepth[y * sw + x] = dw[row + sx];
           }
         }
+        // mask 外区域的深度中位数 = 背景的典型深度（生长不得低于它）
+        final List<double> bgSamples = <double>[];
+        for (int i = 0; i < subj.data.length; i += 3) {
+          if (subj.data[i] < 0.5) bgSamples.add(lowDepth[i]);
+        }
+        double bgLevel = 0.0;
+        if (bgSamples.isNotEmpty) {
+          bgSamples.sort();
+          bgLevel = bgSamples[bgSamples.length ~/ 2];
+        }
         subj = SubjectMask(
           width: sw,
           height: sh,
@@ -154,9 +164,12 @@ abstract final class DepthLayerSplitter {
             lowDepth,
             sw,
             sh,
-            tol: 0.22,
-            // 最多长到 mask 宽度的 12%（约等于原图里"腿离躯干"的量级）
-            maxSteps: math.max(8, (sw * 0.12).round()),
+            // 容差收紧：只补"与身体深度连续"的部位（腿、手臂）
+            tol: 0.15,
+            // 最多长 mask 宽度的 6% —— 取 12% 时实测会把周围背景一起吞进来
+            maxSteps: math.max(6, (sw * 0.06).round()),
+            // 背景深度水平之上再留一点余量，避免贴着背景蔓延
+            minDepth: bgLevel + 0.06,
           ),
         );
       }
@@ -323,7 +336,8 @@ abstract final class DepthLayerSplitter {
   ///   更稳的"相邻像素深度差"，并额外用 [maxSteps] 限制生长距离，因此不会
   ///   顺着平坦的背景一路蔓延出去。
   ///
-  /// [tol] 相邻像素深度容差（归一化深度单位）；[maxSteps] 最大生长步数。
+  /// [tol] 相邻像素深度容差（归一化深度单位）；[maxSteps] 最大生长步数；
+  /// [minDepth] 深度下限 —— 低于它的像素一律不生长。
   static Float32List _growByDepth(
     Float32List mask,
     Float32List depth,
@@ -331,6 +345,7 @@ abstract final class DepthLayerSplitter {
     int h, {
     required double tol,
     required int maxSteps,
+    double minDepth = 0.0,
   }) {
     final Float32List out = Float32List(mask.length);
     final Int32List dist = Int32List(mask.length);
@@ -360,6 +375,12 @@ abstract final class DepthLayerSplitter {
         final int n = ny * w + nx;
         if (dist[n] != 0) continue;
         if ((depth[n] - di).abs() > tol) continue;
+        // ★ 深度下限：背景所在的深度不再蔓延。
+        //   只看"局部连续"是不够的 —— 人物周围的背景（路面、花瓣）深度常常
+        //   和身体接近，光看局部差会把整片背景一起吞进来（实测："渲染图带着
+        //   周围背景一起动了"）。以 mask 外区域的深度中位数作为背景水平，
+        //   低于它就不再生长。
+        if (depth[n] < minDepth) continue;
         dist[n] = step + 1;
         out[n] = 1.0;
         queue[tail++] = n;
