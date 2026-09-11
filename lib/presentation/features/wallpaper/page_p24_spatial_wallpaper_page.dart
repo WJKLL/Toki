@@ -83,21 +83,24 @@ class _PageP24SpatialWallpaperPageState
   DepthTemplate _template = DepthTemplate.presets.first;
   Offset _focusUv = const Offset(0.5, 0.5);
   double _focus = 0.5; // 焦点深度（0 = 最远，1 = 最近）
-  /// 视差强度（逻辑像素）：**直接就是最大位移量**。
+  /// 视差强度（逻辑像素）—— 作用在【最远层】上的最大位移。
   ///
-  /// ⚠️ 历史上这里与「晃动幅度」双重缩放（14 × 0.55 ≈ 7.7 px），使主体与背景的
-  ///    实际位移差只有 2~4 px —— 观感上就是"主体区分不清"。现已合并为单一像素值。
-  /// 默认 8：市面成熟空间壁纸的视差是"轻微"的。位移越大，shader 的视野放大
-  ///    倍率越高（画面四周裁得越多），所以宁可小一点 —— 8px 在 380dp 屏上约
-  ///    2.1%，空间感已经很清楚。
-  double _amount = 8;
+  /// ⚠️ **已锁定，不向用户开放调整**（实测结论）。
+  ///
+  ///   原因：穿帮带宽 = 相邻层的位移差。位移越大，主体轮廓外露出的错位内容
+  ///   越宽 —— 实测只要把这项交给用户，就一定会被调到穿帮的位置。而"克制"
+  ///   本身就是市面成熟空间壁纸的共识（苹果空间照片的位移同样是收着的）。
+  ///
+  ///   10px 在 380dp 宽的屏上约 2.6%；配合 [_subjectRatio] = 0.25 后，层间差
+  ///   只有 7.5px，空间感清楚且不穿帮。
+  static const double _amount = 10;
 
-  /// 位移上限：占画面【短边】的比例。
+  /// 主体（最近层）位移占 [_amount] 的比例。
   ///
-  /// 位移越大，shader 的 uZoom 视野放大倍率越高、画面四周裁掉越多（这是修
-  /// "位移时露出底图"的代价）。超过 5% 短边后放大已肉眼可见，故对【实际生效
-  /// 值】设上限 —— 滑块仍可拉更大，但不会真的生效。
-  static const double _maxAmountRatio = 0.05;
+  /// 0.25 = 主体**跟着动，但幅度只有背景的四分之一** —— 这就是"晃动时主体
+  /// 还有一点立体感"（对齐苹果空间照片的观感），同时把层间差压到
+  /// 0.75 × _amount。取 0（主体钉死）会变成旧的反向模型，层间差拉满、穿帮明显。
+  static const double _subjectRatio = 0.25;
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -473,13 +476,6 @@ class _PageP24SpatialWallpaperPageState
           child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c) {
               final Size size = c.biggest;
-              // ★ 安全限幅：位移越大，shader 的视野放大倍率越高（画面四周裁得
-              //   越多），超过约 5% 短边后放大已肉眼可见。这里约束【实际生效
-              //   值】—— 滑块仍可拉更大，但不会真的生效。
-              final double safeAmount = math.min(
-                _amount,
-                size.shortestSide * _maxAmountRatio,
-              );
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
                 child: GestureDetector(
@@ -505,14 +501,14 @@ class _PageP24SpatialWallpaperPageState
                               ? LayeredParallaxView(
                                   layerSet: set,
                                   shift: shift,
-                                  amount: safeAmount,
-                                  focus: _focus,
+                                  amount: _amount,
+                                  subjectRatio: _subjectRatio,
                                 )
                               : ParallaxView(
                                   image: photo,
                                   depth: depth,
                                   shift: shift,
-                                  amount: safeAmount,
+                                  amount: _amount,
                                   focus: _focus,
                                   showDepth: _showDepth,
                                   depthGamma: _gamma,
@@ -530,7 +526,7 @@ class _PageP24SpatialWallpaperPageState
                                 components: _components,
                                 size: size,
                                 shift: shift,
-                                amount: safeAmount,
+                                amount: _amount,
                                 tiltFollow: _tiltFollow,
                                 selectedId: _selectedId,
                                 onSelect: (String id) =>
@@ -649,15 +645,14 @@ class _PageP24SpatialWallpaperPageState
             ),
           ],
           const SizedBox(height: 4),
-          MiuixSliderPreference(
-            title: '视差强度',
-            summary: '${_amount.round()} px · 层间位移差'
-                '（超过画面短边 ${(_maxAmountRatio * 100).round()}% 不生效）',
-            value: _amount,
-            min: 0,
-            max: 24,
-            insideMargin: _itemMargin,
-            onValueChange: (double v) => setState(() => _amount = v),
+          // ★ 「视差强度」滑块已移除（v1.53）：穿帮带宽 = 相邻层位移差，位移越大
+          //   主体轮廓外露出的错位内容越宽。交给用户调就一定会被调到穿帮的位置，
+          //   故改为固定值 _amount，并由 _subjectRatio 保证"主体跟着动、幅度小"。
+          MiuixText(
+            '视差强度固定 ${_amount.round()} px · 主体占 '
+            '${(_subjectRatio * 100).round()}%（已锁定：可调会让主体边缘穿帮）',
+            style: MiuixTheme.of(context).textStyles.body2,
+            color: colors.onSurfaceVariantSummary,
           ),
           // ★ 分层数：2 层最稳（主体 / 背景两块），层数越多纵深层次越细，
           //   但层与层之间的"纸片感"也越明显。仅 AI 深度下有效。

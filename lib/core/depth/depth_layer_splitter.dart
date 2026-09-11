@@ -103,8 +103,12 @@ abstract final class DepthLayerSplitter {
     //   层图的 RGB 若直接用整张原图，最远层里就【含着主体】—— 主体层移开后
     //   会露出"原位置的另一个主体"（实测："底图的人物会露出"）。
     //   把非本层区域换成原图的模糊版，移开后露出的就是柔和的背景色调。
+    //
+    //   ⚠️ 半径必须足够大：0.035 时人物只是"糊了一层"，仍看得出形状与配色，
+    //   位移后就是明显的一块"被抠掉的部分"（实测反馈）。0.10 之后主体位置
+    //   只剩周围区域的色调，露出来的是渐变色块而不是一个模糊的人形。
     final Uint8List soft =
-        await _blurredRgba(photo, w, h, math.max(10.0, w * 0.035));
+        await _blurredRgba(photo, w, h, math.max(10.0, w * 0.10));
     final Float32List dw = _resampleDepth(depth, w, h);
 
     // ★ 2 层时的切点用 Otsu 自动求，而不是固定 0.5 等分。

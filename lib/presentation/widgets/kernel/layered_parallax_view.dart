@@ -27,8 +27,8 @@ class LayeredParallaxView extends StatefulWidget {
     super.key,
     required this.layerSet,
     this.shift = Offset.zero,
-    this.amount = 26,
-    this.focus = 0.5,
+    this.amount = 12,
+    this.subjectRatio = 0.25,
   });
 
   final DepthLayerSet layerSet;
@@ -36,11 +36,15 @@ class LayeredParallaxView extends StatefulWidget {
   /// 单位位移方向（各分量 -1..1）。
   final Offset shift;
 
-  /// 最大位移（逻辑像素）。
+  /// 最大位移（逻辑像素）—— 作用在【最远层】上。
   final double amount;
 
-  /// 焦点深度 0..1（该层完全钉住）。
-  final double focus;
+  /// 主体（最近层）的位移占 [amount] 的比例。
+  ///
+  /// 0 = 主体完全钉住（旧的反向模型），1 = 与背景同幅。
+  /// 取 0.25：主体仍有可见位移（"晃动时主体还有一点立体感"，对齐苹果空间
+  /// 照片的观感），但层间差只有 amount 的 0.75 倍 —— 穿帮带明显变窄。
+  final double subjectRatio;
 
   @override
   State<LayeredParallaxView> createState() => _LayeredParallaxViewState();
@@ -104,7 +108,7 @@ class _LayeredParallaxViewState extends State<LayeredParallaxView> {
         layerSet: widget.layerSet,
         shift: widget.shift,
         amount: widget.amount,
-        focus: widget.focus,
+        subjectRatio: widget.subjectRatio,
         devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       ),
       child: const SizedBox.expand(),
@@ -118,7 +122,7 @@ class _ComposePainter extends CustomPainter {
     required this.layerSet,
     required this.shift,
     required this.amount,
-    required this.focus,
+    required this.subjectRatio,
     required this.devicePixelRatio,
   });
 
@@ -126,7 +130,7 @@ class _ComposePainter extends CustomPainter {
   final DepthLayerSet layerSet;
   final Offset shift;
   final double amount;
-  final double focus;
+  final double subjectRatio;
   final double devicePixelRatio;
 
   @override
@@ -142,32 +146,32 @@ class _ComposePainter extends CustomPainter {
     ui.Image imageOf(int i) =>
         i < layers.length ? layers[i].image : layers.last.image;
 
-    // 位移系数：焦点所在层钉住（0），其余层按【层序距离】给有符号系数 ——
-    // 比焦点层远的为负、近的为正，前后景反向移动才是立体感的来源。
-    // span 只取"焦点层到最边缘层"的距离，于是【层间位移差 = uAmount】：
-    // 10~12px 就能有清楚的空间感，不必把总位移拉到 20px+（那会让采样越界的
-    // 边缘拉伸变得明显）。
-    int focusLayer = 0;
-    double bestDist = double.infinity;
-    for (int i = 0; i < layers.length; i++) {
-      final double dd = (layers[i].centerDepth - focus).abs();
-      if (dd < bestDist) {
-        bestDist = dd;
-        focusLayer = i;
-      }
-    }
-    final int span = math.max(focusLayer, layers.length - 1 - focusLayer);
+    // ★ 位移系数：同向递减（对齐仿真验证过的观感，也是苹果空间照片的做法）。
+    //
+    //   层已按 centerDepth 升序排好 —— i = 0 最远、i = n−1 最近（主体）。
+    //   最远层位移最大，最近层位移最小，但【方向一致】。
+    //
+    //   为什么不用"焦点层钉住 + 前后景反向"：
+    //     穿帮带宽 = 相邻层的位移差。
+    //       反向模型：主体纹丝不动、背景整体滑走 → 层间差 = uAmount，
+    //                 主体轮廓外会露出一条 uAmount 宽的错位内容（实测：
+    //                 "会露出被扣掉的部分"）；
+    //       同向模型：层间差 = uAmount × (1 − subjectRatio) ≈ 0.75×uAmount，
+    //                 而且主体自己也动 —— 观感是整片一起位移，"抠图边"不显眼，
+    //                 同时主体仍保住"晃动时有一点立体感"。
     double coefOf(int i) {
-      if (span == 0) return 0.0;
-      final int idx = i < layers.length ? i : layers.length - 1;
-      return (idx - focusLayer) / span;
+      final int n = layers.length;
+      if (n <= 1) return subjectRatio;
+      final int idx = i < n ? i : n - 1;
+      return subjectRatio + (1.0 - subjectRatio) * (n - 1 - idx) / (n - 1);
     }
 
     // ★ 视野放大倍率：位移会让层边缘取到纹理之外 —— 不处理就直接露出页面
     //   底色（实测反馈"空间图还是会露出底图"）。放大后等效于给每层补了
     //   margin：位移时画面边缘仍落在层图内部，既不露底、也没有边缘像素被
     //   拉伸的糊边。代价是四周各裁掉一点视野，裁多少随位移自动增大。
-    //   2× 是因为位移系数有正有负（最远层 −1、最近层 +1）。
+    //   （shader 侧是【除以】uZoom 才是收窄采样范围 —— 写成乘法会越界被 clamp，
+    //     反而拉出一圈糊边，这一点极易写反。）
     final double amountPx = amount * devicePixelRatio;
     final double minSide = math.min(wPx, hPx);
     final double zoom = minSide <= 1.0
@@ -206,7 +210,7 @@ class _ComposePainter extends CustomPainter {
   bool shouldRepaint(covariant _ComposePainter old) {
     return old.shift != shift ||
         old.amount != amount ||
-        old.focus != focus ||
+        old.subjectRatio != subjectRatio ||
         old.devicePixelRatio != devicePixelRatio ||
         !identical(old.layerSet, layerSet);
   }
