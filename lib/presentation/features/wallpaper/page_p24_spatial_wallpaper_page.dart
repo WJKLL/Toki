@@ -27,12 +27,14 @@ import '../../../core/depth/onnx_depth_inference.dart';
 import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/wallpaper/depth_template_renderer.dart';
 import '../../../domain/entities/depth_template.dart';
+import '../../../domain/entities/spatial_component.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
 import '../../widgets/c26_more_menu.dart';
 import '../../widgets/kernel/layered_parallax_view.dart';
 import '../../widgets/kernel/parallax_view.dart';
+import '../../widgets/kernel/spatial_component_layer.dart';
 
 class PageP24SpatialWallpaperPage extends ConsumerStatefulWidget {
   const PageP24SpatialWallpaperPage({super.key});
@@ -94,6 +96,22 @@ class _PageP24SpatialWallpaperPageState
   bool _showDepth = false;
   bool _autoWobble = true;
   bool _busy = false;
+
+  // ── 组件（S-38 / C-67 · PLAN_components_v1.53.md 期 1）──────────
+  /// 叠在分层视差画面之上的组件列表。
+  ///
+  /// 默认放一个数字时钟：打开页面就有东西可调，而"时钟不动、背景和主体在动"
+  /// 正是这个功能的核心验收点。
+  List<SpatialComponent> _components = <SpatialComponent>[
+    SpatialComponent.clock(),
+  ];
+
+  /// 当前选中的组件 id（null = 未选中）。
+  String? _selectedId;
+
+  /// 全局倾斜跟随强度 0..1：晃动时组件平面轻微反向倾斜 → "贴在空间里"的
+  /// 侧向透视感。位置不动，所以仍然满足"时钟没动"。
+  double _tiltFollow = 0.4;
 
   late final AnimationController _ticker;
 
@@ -324,6 +342,68 @@ class _PageP24SpatialWallpaperPageState
     }
   }
 
+  // ── 组件（S-38）─────────────────────────────────────────
+  /// 当前选中的组件（未选中 / 已被删除 → null）。
+  SpatialComponent? get _selected {
+    final String? id = _selectedId;
+    if (id == null) return null;
+    for (final SpatialComponent c in _components) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  /// 就地替换选中组件（整表换新实例 —— S-38 是不可变模型）。
+  void _updateSelected(SpatialComponent Function(SpatialComponent) f) {
+    final String? id = _selectedId;
+    if (id == null) return;
+    setState(() {
+      _components = <SpatialComponent>[
+        for (final SpatialComponent c in _components)
+          if (c.id == id) f(c) else c,
+      ];
+    });
+  }
+
+  void _addClock() {
+    // 依次错开纵向位置：连点两次不会完全重叠，省去"看不见新增组件"的困惑。
+    final SpatialComponent c = SpatialComponent.clock(
+      v: 0.16 + 0.13 * (_components.length % 5),
+    );
+    setState(() {
+      _components = <SpatialComponent>[..._components, c];
+      _selectedId = c.id;
+    });
+  }
+
+  void _removeSelected() {
+    final String? id = _selectedId;
+    if (id == null) return;
+    setState(() {
+      _components = <SpatialComponent>[
+        for (final SpatialComponent c in _components)
+          if (c.id != id) c,
+      ];
+      _selectedId = null;
+    });
+  }
+
+  /// 拖动组件：按归一化增量改位置，并夹在画面内（留边距，防拖出可视区）。
+  void _moveComponent(String id, Offset deltaUv) {
+    setState(() {
+      _components = <SpatialComponent>[
+        for (final SpatialComponent c in _components)
+          if (c.id == id)
+            c.copyWith(
+              u: (c.u + deltaUv.dx).clamp(0.06, 0.94),
+              v: (c.v + deltaUv.dy).clamp(0.04, 0.96),
+            )
+          else
+            c,
+      ];
+    });
+  }
+
   // ── 视图 ────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -406,24 +486,43 @@ class _PageP24SpatialWallpaperPageState
                           // 近层移开由下层内容填补 → **没有遮挡空洞/拖影**。
                           // 深度图预览时仍走 shader（要看深度本身）。
                           final DepthLayerSet? set = _layerSet;
-                          if (set != null && !_showDepth) {
-                            return LayeredParallaxView(
-                              layerSet: set,
-                              shift: shift,
-                              amount: _amount,
-                              focus: _focus,
-                            );
-                          }
-                          return ParallaxView(
-                            image: photo,
-                            depth: depth,
-                            shift: shift,
-                            amount: _amount,
-                            focus: _focus,
-                            showDepth: _showDepth,
-                            depthGamma: _gamma,
-                            layers: _layers,
-                            focusBand: _focusBand,
+                          final Widget picture = (set != null && !_showDepth)
+                              ? LayeredParallaxView(
+                                  layerSet: set,
+                                  shift: shift,
+                                  amount: _amount,
+                                  focus: _focus,
+                                )
+                              : ParallaxView(
+                                  image: photo,
+                                  depth: depth,
+                                  shift: shift,
+                                  amount: _amount,
+                                  focus: _focus,
+                                  showDepth: _showDepth,
+                                  depthGamma: _gamma,
+                                  layers: _layers,
+                                  focusBand: _focusBand,
+                                );
+                          // ★ 组件层与画面【共用同一个 shift】→ 完全同步。
+                          //   组件的位移由各自 parallax 决定（默认 0 = 固定），
+                          //   故默认观感就是"背景和主体在动、时钟不动"。
+                          return Stack(
+                            fit: StackFit.expand,
+                            children: <Widget>[
+                              picture,
+                              SpatialComponentLayer(
+                                components: _components,
+                                size: size,
+                                shift: shift,
+                                amount: _amount,
+                                tiltFollow: _tiltFollow,
+                                selectedId: _selectedId,
+                                onSelect: (String id) =>
+                                    setState(() => _selectedId = id),
+                                onMove: _moveComponent,
+                              ),
+                            ],
                           );
                         },
                       ),
@@ -647,9 +746,175 @@ class _PageP24SpatialWallpaperPageState
             onChanged: (bool v) => setState(() => _showDepth = v),
             insideMargin: _itemMargin,
           ),
+
+          // ══ 组件（S-38 / C-67 · 期 1）══════════════════════════════
+          // 组件叠在分层视差画面【之上】，与画面共用同一个晃动源。
+          // 期 1：数字时钟 + Z/视差解耦 + 3D 平面透视 + 透明度。
+          // 期 2 接入折射玻璃（LensRefraction）、期 6 接入深度遮挡。
+          const SizedBox(height: 10),
+          MiuixText('组件', style: MiuixTheme.of(context).textStyles.body1),
+          const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: MiuixButton(
+                  key: const ValueKey<String>('wallpaper.comp.add'),
+                  onPressed: hasImage ? _addClock : null,
+                  child: const Text('添加时钟'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: MiuixButton(
+                  key: const ValueKey<String>('wallpaper.comp.del'),
+                  onPressed: hasImage && _selected != null
+                      ? _removeSelected
+                      : null,
+                  child: const Text('删除选中'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ..._buildComponentControls(colors, hasImage),
         ],
       ),
     );
+  }
+
+  /// 选中组件的参数（S-38）。未选中时给出操作提示。
+  List<Widget> _buildComponentControls(MiuixColors colors, bool hasImage) {
+    if (!hasImage) return const <Widget>[];
+    final SpatialComponent? c = _selected;
+    if (c == null) {
+      return <Widget>[
+        MiuixText(
+          _components.isEmpty
+              ? '还没有组件 —— 点「添加时钟」开始'
+              : '点画面上的组件即可选中，拖动可改位置',
+          style: MiuixTheme.of(context).textStyles.body2,
+          color: colors.onSurfaceVariantSummary,
+        ),
+      ];
+    }
+    return <Widget>[
+      MiuixText(
+        '$c.label · 位置 ${(c.u * 100).round()}% / ${(c.v * 100).round()}%'
+        '（直接拖动组件可改位置）',
+        style: MiuixTheme.of(context).textStyles.body2,
+        color: colors.onSurfaceVariantSummary,
+      ),
+      // ★ Z 与视差【解耦】：Z 决定前后关系（期 6 起同时决定遮挡），
+      //   视差系数决定动不动。默认 Z 最前 + 视差 0 = 盖在最上层但完全固定。
+      MiuixSliderPreference(
+        title: '组件深度 Z',
+        summary: '${(c.depth * 100).round()}%（1 = 最前，决定前后关系与投影）',
+        value: c.depth,
+        min: 0,
+        max: 1,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(depth: v)),
+      ),
+      MiuixSliderPreference(
+        title: '视差系数',
+        summary: c.parallax.abs() < 0.005
+            ? '0 —— 完全固定（时钟不随晃动移动）'
+            : '${c.parallax.toStringAsFixed(2)} × ${_amount.round()}px',
+        value: c.parallax,
+        min: -1,
+        max: 1,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(parallax: v)),
+      ),
+      // 倾角 + 透视：这两个才是"像贴上去"的来源（位置不动，只改朝向）。
+      MiuixSliderPreference(
+        title: '平面倾斜',
+        summary: '${(c.tiltY * 180 / math.pi).toStringAsFixed(0)}°（侧向视角）',
+        value: c.tiltY,
+        min: -0.6,
+        max: 0.6,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(tiltY: v)),
+      ),
+      MiuixSliderPreference(
+        title: '俯仰倾斜',
+        summary: '${(c.tiltX * 180 / math.pi).toStringAsFixed(0)}°',
+        value: c.tiltX,
+        min: -0.4,
+        max: 0.4,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(tiltX: v)),
+      ),
+      MiuixSliderPreference(
+        title: '透视强度',
+        summary: c.perspective < 0.0001
+            ? '关闭（平行投影）'
+            : '${(1 / c.perspective).round()}px 视距',
+        value: c.perspective,
+        min: 0,
+        max: 0.004,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(perspective: v)),
+      ),
+      MiuixSliderPreference(
+        title: '倾斜跟随',
+        summary: _tiltFollow < 0.01
+            ? '关闭（组件平面完全静止）'
+            : '${(_tiltFollow * 100).round()}%（晃动时组件轻微反向倾斜）',
+        value: _tiltFollow,
+        min: 0,
+        max: 1,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) => setState(() => _tiltFollow = v),
+      ),
+      MiuixSliderPreference(
+        title: '组件缩放',
+        summary: '${(c.scale * 100).round()}%',
+        value: c.scale,
+        min: 0.5,
+        max: 2,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(scale: v)),
+      ),
+      MiuixSliderPreference(
+        title: '组件透明度',
+        summary: '${(c.opacity * 100).round()}%',
+        value: c.opacity,
+        min: 0.15,
+        max: 1,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(opacity: v)),
+      ),
+      MiuixSliderPreference(
+        title: '玻璃感',
+        summary: c.glass < 0.02
+            ? '关闭（无玻璃底）'
+            : '${(c.glass * 100).round()}%（期 2 起接入折射玻璃）',
+        value: c.glass,
+        min: 0,
+        max: 1,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(glass: v)),
+      ),
+      MiuixSliderPreference(
+        title: '圆角',
+        summary: '${c.corner.round()} px',
+        value: c.corner,
+        min: 0,
+        max: 48,
+        insideMargin: _itemMargin,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(corner: v)),
+      ),
+    ];
   }
 }
 
