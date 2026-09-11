@@ -315,6 +315,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.3.0"
+  flutter_onnxruntime:
+    dependency: "direct main"
+    description:
+      name: flutter_onnxruntime
+      sha256: "14cb7872d164d8d2fd52e8137775916ea9d46f67a4100ff11cdc62d41752fe5e"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.8.5"
   flutter_riverpod:
     dependency: "direct main"
     description:

@@ -26,6 +26,7 @@ import '../features/todo/page_p11_v2_flow_editor_page.dart';
 import '../features/todo/page_p12_archive_page.dart';
 import '../features/tools/page_p08_steam_query_page.dart';
 import '../features/tools/page_p09_tool_generic.dart';
+import '../features/wallpaper/page_p24_spatial_wallpaper_page.dart';
 import '../shell/main_shell_page.dart';
 import '../providers/settings_providers.dart';
 import 'miuix_route_transitions.dart';
@@ -48,6 +49,7 @@ const Set<String> _knownPaths = <String>{
   '/settings/theme', // R-08
   '/timetable', // R-10（大课表编辑页，二级页面）
   '/steam', // R-11（v1.34.0 P-08：Steam 用户查询页，二级页面）
+  '/spatial-wallpaper', // R-20（v1.52.0 P-24：空间壁纸编辑器，二级页面）
   // R-12（v1.35.0 P-09）：通用工具页为动态路径 /tool/:toolId，不入本集合，
   //   redirect 中以 /tool/ 前缀放行（见 redirect 分支）。
 };
@@ -168,6 +170,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: 'R-11',
         pageBuilder: (context, state) =>
             _pageFor(context, const PageP08SteamQueryPage()),
+      ),
+      // v1.52.0（P-24 / R-20）：空间壁纸编辑器（阶段 1 雏形 ——
+      //   图片 + 预设景深模板 → 视差渲染 + 焦点设定）。
+      GoRoute(
+        path: '/spatial-wallpaper',
+        name: 'R-20',
+        pageBuilder: (context, state) =>
+            _pageFor(context, const PageP24SpatialWallpaperPage()),
       ),
       // v1.35.0（P-09 / R-12）：通用工具页（/tool/:toolId；定制路由工具
       //   如 Steam 走各自页面，不经此处）。

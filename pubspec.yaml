@@ -54,6 +54,12 @@ dependencies:
   vyuh_node_flow: ^0.32.0
   # v1.46.0:vyuh 节点自渲染卡的响应式依赖(Observer)。
   flutter_mobx: ^2.3.0
+  # v1.52.0（S-31 空间壁纸）：端侧 ONNX Runtime 推理。
+  #   ⚠️ 该包**不支持 OpenHarmony**（平台声明只有 android/ios/macos/windows/linux/web）。
+  #   鸿蒙侧需另写 @ohos/onnxruntime + MethodChannel 实现，注册到
+  #   DepthInferenceRegistry（见 lib/core/depth/depth_inference.dart）。
+  #   镜像 pubspec 不应含本依赖；lib/core/depth/onnx_depth_inference.dart 属主项目独有。
+  flutter_onnxruntime: ^1.8.5
 
 # v1.46.0:本地 vendor 覆盖(见上注释)。
 dependency_overrides:
@@ -80,6 +86,10 @@ flutter:
   shaders:
     - shaders/lens_refraction.frag
     - shaders/bloom_dual_peak.frag
+    # v1.52.0（P-24 空间壁纸）：深度视差着色器（阶段 1 雏形）
+    - shaders/spatial_parallax.frag
+    # v1.52.0（P-24）：分层视差合成（GPU 合成，替代 Canvas 多次 drawImage）
+    - shaders/layer_compose.frag
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -90,6 +100,8 @@ flutter:
   assets:
     - assets/tools/tools.json
     - assets/images/app_icon.png
+    # v1.52.0（S-31 空间壁纸）：端侧深度模型（YOLO26-n depth，FP16 dynamic，约 10 MB）
+    - assets/models/yolo26n-depth_fp16.onnx
     # OH 引擎 LTPO 帧率投票开关(SWITCH 0 = 关闭投票,跟随系统设置);
     # Android/Web 忽略此文件。
     - framesconfig.json

@@ -184,6 +184,15 @@
       "icon": "photos",
       "tools": [
         {
+          "id": "spatial_wallpaper",
+          "name": "空间壁纸",
+          "summary": "深度图 + 视差，让照片有 3D 纵深感",
+          "icon": "photos",
+          "costCredits": 0,
+          "displayType": "custom",
+          "customRoute": "/spatial-wallpaper"
+        },
+        {
           "id": "bing_daily",
           "name": "必应每日壁纸",
           "summary": "必应每日高清壁纸",
