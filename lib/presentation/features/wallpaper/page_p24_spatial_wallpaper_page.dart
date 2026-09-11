@@ -20,6 +20,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_miuix/miuix.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/depth/depth_guided_filter.dart';
 import '../../../core/depth/depth_inference.dart';
 import '../../../core/depth/depth_layer_splitter.dart';
 import '../../../core/depth/depth_post_process.dart';
@@ -287,7 +288,7 @@ class _PageP24SpatialWallpaperPageState
         setState(() => _aiInfo = '推理失败 —— 已保留预设模板');
         return;
       }
-      final DepthResult smoothed = DepthPostProcess.smooth(r, _smooth);
+      final DepthResult smoothed = await _refineDepth(r);
       final ui.Image img = await smoothed.toImage();
       // ★ S-39：主体分割。不可用/失败 → null，分层自动退回纯深度阈值 ——
       //   分割只负责"让分层更准"，绝不允许它阻断整条链路。
@@ -344,6 +345,24 @@ class _PageP24SpatialWallpaperPageState
     }
   }
 
+  /// 深度后处理链：保边平滑 → **引导滤波**（U-13）。
+  ///
+  /// 抽成一个方法是因为两条路径都需要它（首次推理 / 调「主体平滑」后重建）；
+  /// 两条路径必须产出一致的深度图，否则调一次平滑就会看到另一种边缘。
+  ///
+  /// ★ 引导滤波为什么放在最后（本轮的根本结论）
+  ///   前面所有针对边界的启发式（深度阈值、连通性）都是在拿【深度值】去猜
+  ///   边界在哪，而物体边界本来就画在图像上（亮度/颜色在那里有明显跳变）。
+  ///   引导滤波以原图为引导、让深度边缘对齐图像的真实边缘 —— 这才用对了信息。
+  Future<DepthResult> _refineDepth(DepthResult raw) async {
+    DepthResult d = DepthPostProcess.smooth(raw, _smooth);
+    final ui.Image? guide = _photo;
+    if (guide != null) {
+      d = await DepthGuidedFilter.apply(depth: d, photo: guide);
+    }
+    return d;
+  }
+
   /// S-39：跑一次主体分割。
   ///
   /// 未注册（鸿蒙未注入实现）或任何异常 → 返回 null，调用方降级为纯深度分层。
@@ -398,7 +417,7 @@ class _PageP24SpatialWallpaperPageState
     final ui.Image? photo = _photo;
     if (r == null || photo == null) return;
     unawaited(() async {
-      final DepthResult smoothed = DepthPostProcess.smooth(r, _smooth);
+      final DepthResult smoothed = await _refineDepth(r);
       final ui.Image img = await smoothed.toImage();
       final DepthLayerSet? set = await DepthLayerSplitter.split(
         photo: photo,
