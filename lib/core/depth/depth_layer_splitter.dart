@@ -99,16 +99,6 @@ abstract final class DepthLayerSplitter {
     final int h = math.max(8, (photo.height * s).round());
 
     final Uint8List src = await _rgbaOf(photo, w, h);
-    // ★ 大幅模糊版：用来填充"不属于本层"的区域。
-    //   层图的 RGB 若直接用整张原图，最远层里就【含着主体】—— 主体层移开后
-    //   会露出"原位置的另一个主体"（实测："底图的人物会露出"）。
-    //   把非本层区域换成原图的模糊版，移开后露出的就是柔和的背景色调。
-    //
-    //   ⚠️ 半径必须足够大：0.035 时人物只是"糊了一层"，仍看得出形状与配色，
-    //   位移后就是明显的一块"被抠掉的部分"（实测反馈）。0.10 之后主体位置
-    //   只剩周围区域的色调，露出来的是渐变色块而不是一个模糊的人形。
-    final Uint8List soft =
-        await _blurredRgba(photo, w, h, math.max(10.0, w * 0.10));
     final Float32List dw = _resampleDepth(depth, w, h);
 
     // ★ 2 层时的切点用 Otsu 自动求，而不是固定 0.5 等分。
@@ -118,6 +108,24 @@ abstract final class DepthLayerSplitter {
     final double split = layerCount == 2
         ? _otsuSplit(dw, 64).clamp(0.12, 0.88)
         : 0.5;
+
+    // ★ 填充源：用来填"不属于本层"的区域。
+    //   层图的 RGB **不能**直接用整张原图 —— 最远层里会【含着主体】，主体层
+    //   移开后就会露出"原位置的另一个主体"。
+    //
+    //   演进过程（全部由真机反馈驱动）：
+    //     ① 直接用原图      → 露出一个清晰的主体（"底图的人物会露出"）
+    //     ② 整图大模糊      → 人物糊了，但形状与配色仍在，是一块"被抠掉的部分"
+    //     ③ ★ 背景色扩散    → 背景的颜色沿边界长进主体区域，露出的是背景的自然
+    //                          延续，而不是一块对不上的色斑
+    //   （必须放在 split 之后 —— 扩散要先知道哪些像素算背景。）
+    final Uint8List soft = _diffusedFill(
+      src: src,
+      w: w,
+      h: h,
+      depth: dw,
+      split: split,
+    );
 
     // ── 层下界（alpha 与"归属"都用它）──────────────────────────
     final List<double> los = <double>[];
@@ -318,7 +326,162 @@ abstract final class DepthLayerSplitter {
     return done.future;
   }
 
-  /// 原图的大幅模糊版（用于填充层的非本层区域）。
+  /// 背景色【扩散填充】：用周围背景的颜色把非背景区域补全。
+  ///
+  /// 为什么不用"整图大模糊"（[_blurredRgba]）：
+  ///   模糊得到的是【局部平均色】—— 背景有明暗渐变或结构时，主体位置会呈现
+  ///   一块与周围对不上的色斑，真机上看就是"被抠掉的部分"。
+  ///   扩散填充让背景的颜色【沿边界长进】主体区域，位移后露出的是背景的自然
+  ///   延续，而不是一块平均色。
+  ///
+  /// 做法（低分辨率迭代扩散）：
+  ///   1) 把原图块平均降到长边 [longSide] 的低分辨率网格，只统计【背景】像素
+  ///      （深度 < [split]），得到每个格子的背景色与"已知度"；
+  ///   2) 反复松弛 [rounds] 轮：未知格子取四邻域按已知度加权的平均色，并把自身
+  ///      已知度往上提一点 —— 颜色于是从背景边界逐层"渗"进主体区域；
+  ///   3) 双线性放大回工作尺寸。
+  ///
+  /// 在低分辨率上迭代是有意为之：既快（约 1.6 万格 × 48 轮），又天然平滑 ——
+  /// 主体背后本来就没有被拍到的内容，任何方案都只能"猜"，而平滑渐变是最不容易
+  /// 露馅的猜法。
+  static Uint8List _diffusedFill({
+    required Uint8List src,
+    required int w,
+    required int h,
+    required Float32List depth,
+    required double split,
+  }) {
+    const int longSide = 96;
+    const int rounds = 48;
+
+    final double s = longSide / math.max(w, h);
+    final int lw = math.max(4, (w * s).round());
+    final int lh = math.max(4, (h * s).round());
+    final int ln = lw * lh;
+
+    final Float32List cr = Float32List(ln);
+    final Float32List cg = Float32List(ln);
+    final Float32List cb = Float32List(ln);
+    final Float32List ck = Float32List(ln); // 已知度 0..1
+
+    // ── 1) 块平均降采样（只累积背景像素）──
+    for (int y = 0; y < h; y++) {
+      final int row = (y * lh ~/ h).clamp(0, lh - 1) * lw;
+      for (int x = 0; x < w; x++) {
+        final int p = y * w + x;
+        if (depth[p] >= split) continue; // 非背景：不贡献颜色
+        final int i = row + (x * lw ~/ w).clamp(0, lw - 1);
+        final int o = p * 4;
+        cr[i] += src[o];
+        cg[i] += src[o + 1];
+        cb[i] += src[o + 2];
+        ck[i] += 1.0;
+      }
+    }
+    // 颜色取平均；已知度 = 该格子里背景像素的占比。
+    final double blockArea = (w / lw) * (h / lh);
+    for (int i = 0; i < ln; i++) {
+      final double n = ck[i];
+      if (n > 0) {
+        cr[i] /= n;
+        cg[i] /= n;
+        cb[i] /= n;
+      }
+      ck[i] = (n / blockArea).clamp(0.0, 1.0);
+    }
+
+    // ── 2) 松弛扩散：颜色从背景边界逐层向主体区域渗透 ──
+    for (int it = 0; it < rounds; it++) {
+      for (int y = 0; y < lh; y++) {
+        for (int x = 0; x < lw; x++) {
+          final int i = y * lw + x;
+          if (ck[i] >= 0.999) continue; // 已完全已知，不再改动
+          double sr = 0;
+          double sg = 0;
+          double sb = 0;
+          double sk = 0;
+          for (int d = 0; d < 4; d++) {
+            final int nx = x + (d == 0 ? -1 : (d == 1 ? 1 : 0));
+            final int ny = y + (d == 2 ? -1 : (d == 3 ? 1 : 0));
+            if (nx < 0 || nx >= lw || ny < 0 || ny >= lh) continue;
+            final int j = ny * lw + nx;
+            final double k = ck[j];
+            if (k <= 0.0) continue;
+            sr += cr[j] * k;
+            sg += cg[j] * k;
+            sb += cb[j] * k;
+            sk += k;
+          }
+          if (sk <= 1e-6) continue;
+          cr[i] = sr / sk;
+          cg[i] = sg / sk;
+          cb[i] = sb / sk;
+          // 已知度提升：下一轮这个格子就能把颜色继续往更深处传。
+          ck[i] = math.min(1.0, ck[i] + sk * 0.14);
+        }
+      }
+    }
+
+    // ── 3) 双线性放大回工作尺寸 ──
+    double bilerp(
+      Float32List c,
+      int i00,
+      int i01,
+      int i10,
+      int i11,
+      double fx,
+      double fy,
+    ) {
+      final double t = c[i00] + (c[i01] - c[i00]) * fx;
+      final double b = c[i10] + (c[i11] - c[i10]) * fx;
+      return t + (b - t) * fy;
+    }
+
+    final Uint8List out = Uint8List(w * h * 4);
+    for (int y = 0; y < h; y++) {
+      final double sy = (y + 0.5) / h * lh - 0.5;
+      final int y0 = sy.floor().clamp(0, lh - 1);
+      final int y1 = math.min(y0 + 1, lh - 1);
+      final double fy = (sy - y0).clamp(0.0, 1.0);
+      for (int x = 0; x < w; x++) {
+        final double sx = (x + 0.5) / w * lw - 0.5;
+        final int x0 = sx.floor().clamp(0, lw - 1);
+        final int x1 = math.min(x0 + 1, lw - 1);
+        final double fx = (sx - x0).clamp(0.0, 1.0);
+        final int i00 = y0 * lw + x0;
+        final int i01 = y0 * lw + x1;
+        final int i10 = y1 * lw + x0;
+        final int i11 = y1 * lw + x1;
+        final int o = (y * w + x) * 4;
+        out[o] = bilerp(cr, i00, i01, i10, i11, fx, fy).round().clamp(0, 255);
+        out[o + 1] = bilerp(
+          cg,
+          i00,
+          i01,
+          i10,
+          i11,
+          fx,
+          fy,
+        ).round().clamp(0, 255);
+        out[o + 2] = bilerp(
+          cb,
+          i00,
+          i01,
+          i10,
+          i11,
+          fx,
+          fy,
+        ).round().clamp(0, 255);
+        out[o + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  /// 原图的大幅模糊版（填充层的非本层区域）。
+  ///
+  /// 已被 [_diffusedFill] 取代（背景色扩散更自然，见其说明），保留以备对照与回退。
+  // ignore: unused_element
   static Future<Uint8List> _blurredRgba(
     ui.Image img,
     int w,
