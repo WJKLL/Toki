@@ -301,6 +301,9 @@ class SpatialComponent {
       v: v,
       scale: scale,
       style: style,
+      // ★ 默认【不要外壳】：文字的美感在字本身，给它垫一个玻璃方框就俗了。
+      //   想要外壳（手账/标签那类）在样式里调 glass 即可。
+      glass: 0,
       props: <String, Object?>{'text': content},
     );
   }
@@ -326,6 +329,8 @@ class SpatialComponent {
       v: v,
       scale: scale,
       style: style,
+      // ★ 默认不要外壳：Logo / 贴纸本身就带形状，垫方框会露出四个角。
+      glass: 0,
       props: <String, Object?>{
         'bytes': bytes,
         'imgName': name,

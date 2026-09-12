@@ -174,12 +174,37 @@ class SpatialComponentLayer extends StatelessWidget {
     }
   }
 
-  /// 组件外壳：期 1 = 简易半透明玻璃；期 2 替换为折射玻璃（仅此函数需改）。
+  /// 组件外壳。
+  ///
+  /// ★ 外壳可以【完全关掉】（glass <= 0.001）—— 这是本轮修复：
+  ///   文字与 Logo 的玻璃/折射感应当作用在**字与图案本身**，而不是给它们
+  ///   垫一个方块。之前 tintA 有 0.04 的地板、rimA 有 0.10 的地板，
+  ///   所以哪怕把"玻璃感"调到 0，仍能看见一个淡淡的框
+  ///   （用户反馈："组件背景框可选择关（透明的，玻璃，折射都是 logo 字体本身）"）。
+  ///   现在 glass = 0 就走"只有内容、没有框"这条最干净的路；
+  ///   选中态只画一圈虚线描边（用于提示选中，不参与导出）。
   Widget _shell(SpatialComponent c, bool selected, Widget child) {
-    // 玻璃浓度随"玻璃感"旋钮走（期 2 该值将改为驱动模糊/折射/色散）。
     final double g = c.glass.clamp(0.0, 1.0);
-    final double tintA = 0.04 + 0.26 * g;
-    final double rimA = 0.10 + 0.55 * g;
+
+    // ── 无外壳：内容直接呈现，选中时只叠一圈细描边 ──
+    if (g <= 0.001) {
+      if (!selected) return child;
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(c.corner),
+          border: Border.all(
+            color: const Color(0xFFFFFFFF).withValues(alpha: 0.75),
+            width: 1.4,
+          ),
+        ),
+        child: child,
+      );
+    }
+
+    // ── 有外壳：玻璃底 + 高光边 + 投影 ──
+    //   浓度从 0 起算（原来是 0.04 / 0.10 的地板），这样"刚开一点"就有反馈。
+    final double tintA = 0.26 * g;
+    final double rimA = 0.55 * g;
 
     return Container(
       decoration: BoxDecoration(
@@ -190,7 +215,7 @@ class SpatialComponentLayer extends StatelessWidget {
           width: selected ? 1.6 : 1.0,
         ),
         boxShadow: <BoxShadow>[
-          // 投影强度随 Z 增大（越靠前越"浮起来"）—— 这是最简单的一层景深线索。
+          // 投影强度随 Z 增大（越靠前越"浮起来"）—— 最简单的一层景深线索。
           BoxShadow(
             color: const Color(0xFF000000).withValues(
               alpha: 0.14 + 0.22 * c.depth.clamp(0.0, 1.0),
