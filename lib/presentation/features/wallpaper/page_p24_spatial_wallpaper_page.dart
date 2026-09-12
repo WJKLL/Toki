@@ -41,6 +41,7 @@ import '../../../core/wallpaper/depth_template_renderer.dart';
 import '../../../core/wallpaper/wallpaper_history_service.dart';
 import '../../../domain/entities/depth_template.dart';
 import '../../../domain/entities/spatial_component.dart';
+import '../../../domain/entities/spatial_style.dart';
 import '../../../core/widgets/app_icons.dart';
 import '../../widgets/c21_collapsing_title_bar.dart';
 import '../../widgets/c25_frosted_top_bar.dart';
@@ -948,6 +949,42 @@ class _PageP24SpatialWallpaperPageState
       _components = <SpatialComponent>[..._components, c];
       _selectedId = c.id;
     });
+  }
+
+  /// 添加艺术字组件。
+  ///
+  /// 纵向位置依次错开（与 _addClock 同一套做法）：连点两次不会完全重叠，
+  /// 也省去"看不见新增组件"的困惑。外观走 S-42 的预设，之后可在样式面板里改。
+  void _addText() {
+    final SpatialComponent c = SpatialComponent.text(
+      content: '你好',
+      v: 0.28 + 0.13 * (_components.length % 5),
+      style: SpatialStylePresets.minimal,
+    );
+    setState(() {
+      _components = <SpatialComponent>[..._components, c];
+      _selectedId = c.id;
+    });
+  }
+
+  /// 添加图案组件（Logo / 贴纸 / 表情）—— 从相册选一张图。
+  Future<void> _pickSticker() async {
+    try {
+      final PlatPickedFile? f =
+          await PlatFileOpsRegistry.instance.pickImage();
+      if (f == null || !mounted) return;
+      final SpatialComponent c = SpatialComponent.sticker(
+        bytes: f.bytes,
+        name: f.name,
+        v: 0.5,
+      );
+      setState(() {
+        _components = <SpatialComponent>[..._components, c];
+        _selectedId = c.id;
+      });
+    } catch (e) {
+      debugPrint('🔴 选图案失败: $e');
+    }
   }
 
   void _removeSelected() {
@@ -2098,7 +2135,28 @@ class _PageP24SpatialWallpaperPageState
                 child: _MiButton(
                   key: const ValueKey<String>('wallpaper.comp.add'),
                   onPressed: hasImage ? _addClock : null,
-                  child: const Text('添加时钟'),
+                  child: const Text('时钟'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MiButton(
+                  key: const ValueKey<String>('wallpaper.comp.text'),
+                  onPressed: hasImage ? _addText : null,
+                  child: const Text('艺术字'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _MiButton(
+                  key: const ValueKey<String>('wallpaper.comp.sticker'),
+                  onPressed:
+                      hasImage ? () => unawaited(_pickSticker()) : null,
+                  child: const Text('图案 / Logo'),
                 ),
               ),
               const SizedBox(width: 8),
