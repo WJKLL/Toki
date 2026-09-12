@@ -230,7 +230,6 @@ abstract final class DepthLayerSplitter {
       }
     }
     final Float32List? mw = subj?.resample(w, h);
-    if (mw != null) layerCount = 2;
 
     // ★ 2 层时的切点用 Otsu 自动求，而不是固定 0.5 等分。
     //   等分的边界会【横穿背景】（实测："背景被分割"、树干断裂）——
@@ -239,6 +238,55 @@ abstract final class DepthLayerSplitter {
     final double split = layerCount == 2
         ? _otsuSplit(dw, 64).clamp(0.12, 0.88)
         : 0.5;
+
+    // ★★ 主体处理方式重构：改为【压平主体区域的深度】，不再改写层结构。
+    //
+    //   旧做法（已废弃）：只要有 mask 就 `layerCount = 2`，并且 alpha/own 完全
+    //   由 mask 决定（见下面的废弃分支）—— **深度被彻底绕过**。
+    //   后果由真机截图证实（富士山那张，modnet 只给出 6.62% 的覆盖率）：
+    //     · 剩下 93.4% 的画面成了【一整块刚体】、同一个速度 → **毫无视差**；
+    //     · 那一小块成了全图唯一"分出来"的东西（走 0.5 倍速）→ 只有它在撕裂。
+    //   用户反馈的"风景图前后识别不行"与"渲染分割出错了"同源于此 ——
+    //   而且"深度图没问题"这句话完全正确：深度根本没参与分层。
+    //
+    //   新做法：把主体区域的深度【压平】成主体的中位深度，然后照常走
+    //   【按深度分层】那条路。于是：
+    //     · 主体整片落在同一层、以同一速度移动（刚体、内部不拉伸）——
+    //       当初引入 mask 想要的好处全部保留；
+    //     · 背景仍然按自己的深度分层 —— 风景图的视差回来了；
+    //     · mask 判错时损害是【局部】的：那块区域只是被压平到它自己的深度，
+    //       再也不会把整幅画面变成一块刚体、也不会独占全部位移。
+    final Float32List dwUse = Float32List.fromList(dw);
+    if (mw != null) {
+      final List<double> inside = <double>[];
+      for (int p = 0; p < w * h; p++) {
+        if (mw[p] > 0.5) inside.add(dw[p]);
+      }
+      // 少于 16 个像素的主体不值得特殊处理（也可能是噪声）
+      if (inside.length >= 16) {
+        inside.sort();
+        final double med = inside[inside.length ~/ 2];
+        // 吸附到 med 所在那层的【层心】。
+        // ★ 必须吸附：若主体恰好骑在层边界上，feather 会把它切成两半 ——
+        //   那就等于主体自己先撕裂了，比不压平还糟。
+        double flat = med;
+        for (int i = 0; i < layerCount; i++) {
+          final double lo = layerCount == 2
+              ? (i == 0 ? 0.0 : split)
+              : i / layerCount;
+          final double hi = layerCount == 2
+              ? (i == 0 ? split : 1.0)
+              : (i + 1) / layerCount;
+          if (med >= lo && (med < hi || i == layerCount - 1)) {
+            flat = (lo + hi) / 2.0;
+            break;
+          }
+        }
+        for (int p = 0; p < w * h; p++) {
+          if (mw[p] > 0.5) dwUse[p] = flat;
+        }
+      }
+    }
 
     // ★ 填充源：用来填"不属于本层"的区域。
     //   层图的 RGB **不能**直接用整张原图 —— 最远层里会【含着主体】，主体层
@@ -331,40 +379,21 @@ abstract final class DepthLayerSplitter {
       for (int p = 0; p < w * h; p++) {
         final double a;
         final double own;
-        if (mw != null) {
-          // ── 有语义 mask 的 2 层 ──
-          //
-          // 层 1（主体）：own = 1（整层原图），alpha = **陡化后**的 mask。
-          //
-          //   ★ 陡化是必须的：isnet/modnet 输出的是 soft 概率，背景区域也有
-          //     0.3~0.5 的值。直接拿它当 alpha，背景就会被 30~50% 地拉进主体层，
-          //     主体一动、那部分背景就跟着动 —— 实测："人物右腿背景又跟着一起
-          //     了"。主体遮罩预览里整幅画面泛红，正是这个原因。
-          //     smoothstep(0.45, 0.75) 把中间值压掉：只有真正判定为主体的像素
-          //     才完全不透明；因为是渐变而非硬阈值，边缘不会出锯齿。
-          //
-          // 层 0（背景）：alpha 恒 1 铺底；own = 1 − s，**与主体层的 alpha 用
-          //   同一个 s**（这是本轮修复的第二个点）。
-          //
-          //   ★ 为什么必须用同一个 s
-          //     旧写法是 own = 1 − smoothstep(0.35, 0.65, m)，比主体层的
-          //     smoothstep(0.45, 0.75) 提前了 0.1 —— 两个区间【错开】。后果：
-          //     在 m ∈ [0.35, 0.45] 这一圈里，背景层已经按 (1−own) 的比例混入
-          //     了【模糊填充】，而主体层的 alpha 还是 0、完全没有覆盖 —— 于是
-          //     主体轮廓外独自露出一圈"糊边"。实测反馈："前景与背景区分很
-          //     割裂（有边框）"，就是这个环带。
-          //     改成同一个 s 后，背景层混入模糊的比例恒等于主体层已覆盖的比例，
-          //     两者严格同步，"没人盖的糊边环带"不复存在。
-          final double m = mw[p];
-          final double s = _smoothstep(0.45, 0.75, m);
-          a = i == 0 ? 1.0 : s;
-          own = i == 0 ? 1.0 - s : 1.0;
-        } else {
-          final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
-          a = aOf[bi];
-          // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
-          own = aNext == null ? a : (a - aNext[bi]).clamp(0.0, 1.0);
-        }
+        // ★ 统一走【深度分层】—— 旧的 mask 分支已删除。
+        //
+        //   主体区域的深度已在上面被【压平成层心】，所以它整片落在同一层、
+        //   以同一速度移动（刚体、内部不拉伸），当初引入 mask 想要的效果都还在；
+        //   而背景照旧按自己的深度分层，风景图的视差不会被 mask 吞掉。
+        //
+        //   旧实现（已废弃）在这里用 mask 直接改写 alpha/own：
+        //       a   = smoothstep(0.45, 0.75, m)
+        //       own = i == 0 ? 1 - a : 1
+        //   它把深度整个绕过了 —— 一个 6.62% 的误判 mask 就能让 93% 的画面
+        //   变成一整块刚体（真机截图证实）。
+        final int bi = (dwUse[p] * (bins - 1)).round().clamp(0, bins - 1);
+        a = aOf[bi];
+        // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
+        own = aNext == null ? a : (a - aNext[bi]).clamp(0.0, 1.0);
         if (a <= 0.0) continue; // 本层不覆盖这里 → 留全透明，合成时无影响
         final int o = p * 4;
         // 本层区域用原图，其余用模糊版：避免平移后露出错位的其它层内容。
