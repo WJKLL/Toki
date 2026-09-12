@@ -355,6 +355,13 @@ class _PageP24SpatialWallpaperPageState
   /// 画布实际尺寸（LayoutBuilder 里记下来，算变换矩阵要用）。
   Size _stageSize = Size.zero;
 
+  /// 参数区是否收起。
+  ///
+  /// ★ 与"再点一次当前工具"的区别：那个会把 _toolTab 清成 0（等于关掉工具），
+  ///   这里只是把参数区藏起来、**保留当前工具与二级选择** ——
+  ///   调好参数后收起面板专心看效果，再展开接着调，不用重新找一遍。
+  bool _panelCollapsed = false;
+
   /// 双指缩放开始时的倍率（捏合的基准），以及单指笔迹是否已起笔。
   double _pinchBase = 1.0;
   bool _strokeStarted = false;
@@ -1019,7 +1026,8 @@ class _PageP24SpatialWallpaperPageState
                       //     SingleChildScrollView 在松约束下会取内容高度，
                       //     内容少时不会白占一块，图自然就大。
                       Expanded(child: _buildStage(colors)),
-                      ConstrainedBox(
+                      if (!_panelCollapsed)
+                        ConstrainedBox(
                         constraints: BoxConstraints(maxHeight: maxPanel),
                         // ★ 换分类 / 二级 / 三级 / 调试都走同一段过渡：淡入 + 轻微上移。
                         //   之前参数区是"啪"地整块换掉，观感很硬。
@@ -2189,7 +2197,24 @@ class _PageP24SpatialWallpaperPageState
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        // ── 三级：文字标签（对齐澎湃的「影调 / 颜色 / 细节」）──
+        // ★ 收起/展开参数区的把手 —— 放在画面与工具之间，一眼能看见。
+        //   调好参数收起来专心看效果；再展开还在原来那一页，不用重新找。
+        if (_toolTab != 0 || _debugOpen)
+          GestureDetector(
+            key: const ValueKey<String>('wallpaper.panel.toggle'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _panelCollapsed = !_panelCollapsed),
+            child: SizedBox(
+              height: 20,
+              child: Center(
+                child: MiuixIcon(
+                  vector: appIcon('expandMore'),
+                  size: 18,
+                  tint: colors.onSurfaceVariantSummary,
+                ),
+              ),
+            ),
+          ),
         if (groups != null && groups.length > 1)
           SizedBox(
             height: 28,
