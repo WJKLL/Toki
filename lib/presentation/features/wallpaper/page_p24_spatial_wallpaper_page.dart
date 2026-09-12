@@ -362,6 +362,10 @@ class _PageP24SpatialWallpaperPageState
   ///   调好参数后收起面板专心看效果，再展开接着调，不用重新找一遍。
   bool _panelCollapsed = false;
 
+  /// 「对比」：显示原图。澎湃/相册编辑器的通用做法 —— 随时能确认
+  /// "我到底改了什么"，这是编辑类工具的刚需。
+  bool _showOriginal = false;
+
   /// 双指缩放开始时的倍率（捏合的基准），以及单指笔迹是否已起笔。
   double _pinchBase = 1.0;
   bool _strokeStarted = false;
@@ -1335,6 +1339,14 @@ class _PageP24SpatialWallpaperPageState
           onTap: () => unawaited(_pickPhoto()),
         ),
         _RoundIconButton(
+          key: const ValueKey<String>('wallpaper.compare'),
+          icon: appIcon('image'),
+          tooltip: '对比原图',
+          onTap: _photo == null
+              ? null
+              : () => setState(() => _showOriginal = !_showOriginal),
+        ),
+        _RoundIconButton(
           key: const ValueKey<String>('wallpaper.history'),
           icon: appIcon('tasks'),
           tooltip: '编辑历史',
@@ -1454,7 +1466,9 @@ class _PageP24SpatialWallpaperPageState
                           // 近层移开由下层内容填补 → **没有遮挡空洞/拖影**。
                           // 深度图预览时仍走 shader（要看深度本身）。
                           final DepthLayerSet? set = _layerSet;
-                          final Widget picture = (set != null && !_showDepth)
+                          final Widget picture = _showOriginal
+                              ? RawImage(image: photo, fit: BoxFit.fill)
+                              : (set != null && !_showDepth)
                               ? LayeredParallaxView(
                                   layerSet: set,
                                   // 深度图给主体层做立体起伏（见 _relief 说明）
@@ -2319,6 +2333,44 @@ class _PageP24SpatialWallpaperPageState
                   }
                 }),
               ),
+              // ★ ✓ 完成 —— 相册编辑器工具行末尾的确认键：收起参数区与工具选择，
+              //   把画面完整让出来（比"再点一次当前分类"更符合直觉）。
+              if (_toolTab != 0 || _debugOpen)
+                GestureDetector(
+                  key: const ValueKey<String>('wallpaper.done'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() {
+                    _toolTab = 0;
+                    _subTab = 0;
+                    _groupTab = 0;
+                    _debugOpen = false;
+                    _brushMode = 0;
+                    _panelCollapsed = false;
+                  }),
+                  child: Container(
+                    width: 58,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        MiuixIcon(
+                          vector: MiuixIcons.basic.check,
+                          size: 22,
+                          tint: _MiAccent.fill,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          '完成',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFFFFD54F),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
