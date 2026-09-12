@@ -382,6 +382,26 @@ abstract final class DepthLayerSplitter {
     final int depthLayerCount = layerCount;
     final int totalLayers = hasSubject ? depthLayerCount + 1 : depthLayerCount;
 
+    // ★★ U-14：把涂刷结果落到【深度】上 —— 这就是"能选刷哪一层"。
+    //
+    //   层归属完全由深度决定，所以"指定这块跟第几层动"等价于"把这块的深度
+    //   改成那一层的层心"。改完它自然整片落进那一层，跟着那一层位移 ——
+    //   不必给渲染侧加任何新概念。
+    //   ⚠️ 必须在建层【之前】改 dwUse，否则算出来的归属还是老的。
+    if (editMask != null && !editMask.isEmpty) {
+      final List<double> centers = <double>[];
+      for (int i = 0; i < layerCount; i++) {
+        final double lo = layerCount == 2
+            ? (i == 0 ? 0.0 : split)
+            : i / layerCount;
+        final double hi = layerCount == 2
+            ? (i == 0 ? split : 1.0)
+            : (i + 1) / layerCount;
+        centers.add((lo + hi) / 2.0);
+      }
+      editMask.applyLayerTo(dwUse, centers, w, h);
+    }
+
     final List<DepthLayer> layers = <DepthLayer>[];
     for (int i = 0; i < totalLayers; i++) {
       final bool isSubject = hasSubject && i == depthLayerCount;

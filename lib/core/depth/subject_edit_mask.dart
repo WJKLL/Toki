@@ -13,10 +13,16 @@
 //   而 AI 那份也仍然在承担绝大部分工作。
 //
 // ★ 为什么用「有符号」而不是两张图
-//   +1 = 用户刷过（强制为主体）
-//   −1 = 用户擦过（强制为背景）
+//   >0 = 用户刷过，值 = 目标层号 + 1（0 = 最远层）
+//   <0 = 用户擦过（强制归第 0 层 = 背景）
 //    0 = 未编辑（沿用 AI 的判断）
 //   一张图同时表达三种状态，内存与遍历都省一半。
+//
+// ★ 从「主体/背景两层」升级到「指定刷第几层」
+//   原来只有 +1（主体）/−1（背景）两态，分层数调到 3、4 层之后，
+//   用户没有任何办法指定"这块该跟第几层一起动" —— 而分层越多，
+//   越需要这个能力（用户反馈："笔刷目前似乎只能刷两层分层，不能选刷哪一层"）。
+//   现在正数的【数值本身】就是层号，涂刷因此变成"给这块像素指定归属层"。
 
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -29,8 +35,11 @@ class SubjectEditMask {
   final int width;
   final int height;
 
-  /// 0 = 未编辑，>0 = 涂为主体，<0 = 擦为背景。
+  /// 0 = 未编辑；>0 = 归入第 (值−1) 层；<0 = 强制归第 0 层（背景）。
   final Float32List data;
+
+  /// 画笔当前的目标层号（0 起，0 = 最远层）。橡皮一律刷回第 0 层。
+  int brushLayer = 0;
 
   /// 是否没有任何笔迹（没有任何编辑 → 整条管线可以被短路掉）。
   bool get isEmpty {
@@ -50,7 +59,8 @@ class SubjectEditMask {
     final double cx = u * width;
     final double cy = v * height;
     final double r = math.max(1.0, radius * math.min(width, height));
-    final double value = erase ? -1.0 : 1.0;
+    // 画笔写入"目标层号 + 1"；橡皮写 −1（强制归第 0 层）。
+    final double value = erase ? -1.0 : (brushLayer + 1).toDouble();
 
     final int x0 = math.max(0, (cx - r).floor());
     final int x1 = math.min(width - 1, (cx + r).ceil());
@@ -91,6 +101,33 @@ class SubjectEditMask {
     for (int i = 0; i <= steps; i++) {
       final double t = i / steps;
       stamp(u0 + (u1 - u0) * t, v0 + (v1 - v0) * t, radius, erase: erase);
+    }
+  }
+
+  /// 把笔迹落到【深度】上：画过的像素压到目标层的层心深度。
+  ///
+  /// ★ 这就是"能选刷哪一层"的实现
+  ///   分层的归属完全由深度决定，所以"指定这一块跟第几层动"等价于
+  ///   "把这一块的深度改成那一层的层心"。改完它自然整片落进那一层，
+  ///   跟着那一层一起位移 —— 不需要给渲染侧加任何新概念。
+  ///
+  /// [centers] 各层中心深度，下标 = 层号（0 = 最远）。
+  /// [w]/[h] 是目标深度图的尺寸（通常比本层大，就近取样即可）。
+  void applyLayerTo(Float32List depth, List<double> centers, int w, int h) {
+    if (centers.isEmpty || w <= 0 || h <= 0) return;
+    for (int y = 0; y < h; y++) {
+      final int ey = (y * height ~/ h).clamp(0, height - 1);
+      final int row = y * w;
+      final int erow = ey * width;
+      for (int x = 0; x < w; x++) {
+        final int ex = (x * width ~/ w).clamp(0, width - 1);
+        final double e = data[erow + ex];
+        if (e == 0) continue;
+        // 擦除 → 第 0 层；涂刷 → 用户选的那一层
+        final int k =
+            e < 0 ? 0 : (e.round() - 1).clamp(0, centers.length - 1);
+        depth[row + x] = centers[k];
+      }
     }
   }
 

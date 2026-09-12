@@ -993,9 +993,33 @@ class _PageP24SpatialWallpaperPageState
                       Expanded(child: _buildStage(colors)),
                       ConstrainedBox(
                         constraints: BoxConstraints(maxHeight: maxPanel),
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: _buildControls(colors),
+                        // ★ 换分类 / 二级 / 三级 / 调试都走同一段过渡：淡入 + 轻微上移。
+                        //   之前参数区是"啪"地整块换掉，观感很硬。
+                        //   key 里带上三级状态才会真正触发切换动画 ——
+                        //   不带 key 的话 AnimatedSwitcher 认为"还是同一个 child"，
+                        //   什么都不会发生（上一版我漏掉的就是这一步）。
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeIn,
+                          transitionBuilder:
+                              (Widget w, Animation<double> a) => FadeTransition(
+                            opacity: a,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.06),
+                                end: Offset.zero,
+                              ).animate(a),
+                              child: w,
+                            ),
+                          ),
+                          child: SingleChildScrollView(
+                            key: ValueKey<String>(
+                              'ctl.$_toolTab.$_groupTab.$_subTab.$_debugOpen',
+                            ),
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: _buildControls(colors),
+                          ),
                         ),
                       ),
                       _buildToolBar(colors),
@@ -1805,6 +1829,43 @@ class _PageP24SpatialWallpaperPageState
           const SizedBox(height: 10),
           MiuixText('手动修正', style: MiuixTheme.of(context).textStyles.body1),
           const SizedBox(height: 6),
+          // ★ 刷到哪一层（用户反馈："笔刷似乎只能刷两层，不能选刷哪一层"）。
+          //   分层数 > 2 时才需要选：2 层时"画笔=主体、橡皮=背景"已经够用，
+          //   多摆一排按钮反而是噪音。
+          //   语义上它就是把这块像素的【深度】改成那一层的层心 ——
+          //   归属层完全由深度决定，所以不必给渲染侧加新概念。
+          if (_layerCount > 2) ...<Widget>[
+            MiuixText(
+              '画笔刷到第 ${(_editMask?.brushLayer ?? 0) + 1} 层'
+              '（共 $_layerCount 层，1 = 最远）',
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: colors.onSurfaceVariantSummary,
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: <Widget>[
+                for (int i = 0; i < _layerCount; i++) ...<Widget>[
+                  Expanded(
+                    child: _MiButton(
+                      key: ValueKey<String>('wallpaper.brushLayer.$i'),
+                      onPressed: () => setState(() {
+                        final SubjectMask? m = _subjectMask;
+                        if (m == null) return;
+                        _editMask ??= SubjectEditMask(m.width, m.height);
+                        _editMask!.brushLayer = i;
+                      }),
+                      colors: (_editMask?.brushLayer ?? 0) == i
+                          ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                          : null,
+                      child: Text('${i + 1}'),
+                    ),
+                  ),
+                  if (i != _layerCount - 1) const SizedBox(width: 6),
+                ],
+              ],
+            ),
+            const SizedBox(height: 4),
+          ],
           Row(
             children: <Widget>[
               Expanded(
