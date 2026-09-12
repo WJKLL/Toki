@@ -151,37 +151,33 @@ abstract final class DepthLayerSplitter {
         // ① 闭运算：填补 mask 内部的凹陷与断裂（不推大整体轮廓）。
         subj = subj.closed(math.max(2, (sw * 0.02).round()));
 
-        // ② ★ 深度连通筛选：剔掉"与身体之间隔着深度台阶"的误判块
-        //    （实测那片实心背景就是它），同时保住手指/手臂这类与身体
-        //    深度连续的边缘部位（全局阈值会把它们误剔）。
-        //    按 mask 分辨率降采样深度即可（判断不需要高精度）。
-        final Float32List lowDepth = Float32List(sw * sh);
-        for (int y = 0; y < sh; y++) {
-          final int sy = (y * h ~/ sh).clamp(0, h - 1);
-          final int row = sy * w;
-          for (int x = 0; x < sw; x++) {
-            final int sx = (x * w ~/ sw).clamp(0, w - 1);
-            lowDepth[y * sw + x] = dw[row + sx];
-          }
-        }
-        subj = SubjectMask(
-          width: sw,
-          height: sh,
-          data: _depthFloor(
-            // ① 连通性：剔掉与人体之间有"深度台阶"的误判块，保住手指/手臂
-            _keepConnected(
-              subj.data,
-              lowDepth,
-              sw,
-              sh,
-              tol: 0.15,
-              seedMin: 0.75,
-            ),
-            // ② 深度下限：兜底剔掉"连通但明显偏远"的块（那片渐变背景在这里被清掉）
-            lowDepth,
-          ),
-        );
+        // ② ★★ 这里【不再用深度做任何剔除】—— 本轮根因修复，勿轻易加回。
+        //
+        //   原位置是 _keepConnected(tol 0.15) + _depthFloor(25分位 − margin 0.12)。
+        //   两者都是【纯深度阈值分割时代】的补丁：那时主体 mask 是从深度推出来的，
+        //   必须用深度去清掉深度自己的误判（"背景实心块被吸进主体层"）。
+        //   现在主体来源已换成语义分割（modnet / isnet），前提消失。
+        //
+        //   ★ 为什么它们从"失效"变成"有害"
+        //     它们的判据是【深度的可靠性】，而实测恰恰在躯干处深度不可靠
+        //     （躯干与背景深度接近）。拿不可靠的信息去否决可靠的分割，结果是
+        //     躯干被判成背景：
+        //       · 归一化视差下躯干跨度约 0.136，与 tol 0.15 / margin 0.12 同量级
+        //         → 躯干正好落在临界带上，【必然】被剔，不是偶发。
+        //       · 表现：mask 只剩头部 + 深度凸出的边缘，躯干掉进背景层；主体层
+        //         走 3px、躯干跟着背景走 6px → 头身撕裂，即用户看到的"残留"。
+        //     实测反馈："识别人物的质量完全不行，每次都渲染出残留" ——
+        //     模型本身是对的（_aiInfo 的覆盖率正常），是这两步把它砍掉了。
+        //
+        //   ★ 去掉之后靠什么兜底
+        //     语义分割不会产生"深度误判块"，所以不会退回旧问题 —— 前提是
+        //     有 mask 时 layerCount 恒为 2、层归属 100% 由 mask 决定
+        //     （见下面 mw != null 分支）。若某张图仍有漏抠（腿、手臂），
+        //     正确手段是 U-14 手动涂刷，而不是再让深度插一脚 —— 深度一旦
+        //     介入就会把躯干一起带走，代价远大于收益。
+        //     两个函数仍保留在类内（unused_element），需要时原位恢复。
       }
+      // ③ 膨胀：抵消"背景层比主体层多走的距离"，防止背景层里的填充滑出轮廓。
       if (subjectDilate > 0.5 && photo.width > 0) {
         final SubjectMask s = subj;
         // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
@@ -243,6 +239,8 @@ abstract final class DepthLayerSplitter {
       h: h,
       depth: dw,
       split: split,
+      // ★ 有语义 mask 时以 mask 为准（见 _diffusedFill 的参数说明）。
+      mask: mw,
     );
 
     // ── 层下界（alpha 与"归属"都用它）──────────────────────────
@@ -373,6 +371,9 @@ abstract final class DepthLayerSplitter {
   ///   于是改为在 mask 内部从核心区域做 BFS，只走"局部深度连续"的邻居。
   ///
   /// [tol] 相邻像素深度容差；[seedMin] 作为种子的 mask 核心阈值。
+  // ★ 已停用：见 split() 中「不再用深度做任何剔除」的说明 —— 它的判据（深度
+  //   连通性）在躯干处不可靠，会把语义分割抠对的身体判成背景。保留备查。
+  // ignore: unused_element
   static Float32List _keepConnected(
     Float32List mask,
     Float32List depth,
@@ -431,6 +432,9 @@ abstract final class DepthLayerSplitter {
   ///   人体内部深度跨度本来就大（手最远、躯干最近），中位数会把手也划到线外。
   ///   取 [quantile] 分位（默认 25%，即偏近的那一侧）再放宽 [margin]，
   ///   手指/腿就都落在范围内，而背景块（远得多）仍会被剔除。
+  // ★ 已停用：见 split() 中「不再用深度做任何剔除」的说明 —— 与
+  //   [_keepConnected] 同因，会把深度接近背景的躯干整片清零。保留备查。
+  // ignore: unused_element
   static Float32List _depthFloor(
     Float32List mask,
     Float32List depth, {
@@ -638,7 +642,8 @@ abstract final class DepthLayerSplitter {
   ///
   /// 做法（低分辨率迭代扩散）：
   ///   1) 把原图块平均降到长边 [longSide] 的低分辨率网格，只统计【背景】像素
-  ///      （深度 < [split]），得到每个格子的背景色与"已知度"；
+  ///      （有 [mask] 时以 mask 为准，否则用深度 < [split]），得到每个格子的
+  ///      背景色与"已知度"；
   ///   2) 反复松弛 [rounds] 轮：未知格子取四邻域按已知度加权的平均色，并把自身
   ///      已知度往上提一点 —— 颜色于是从背景边界逐层"渗"进主体区域；
   ///   3) 双线性放大回工作尺寸。
@@ -652,6 +657,9 @@ abstract final class DepthLayerSplitter {
     required int h,
     required Float32List depth,
     required double split,
+    // ★ 工作尺寸的主体 mask（即 split() 里的 mw）。给了就用它判"哪些像素算
+    //   背景"，[depth]/[split] 退为无 mask 时的判据。
+    Float32List? mask,
   }) {
     const int longSide = 96;
     const int rounds = 48;
@@ -671,7 +679,13 @@ abstract final class DepthLayerSplitter {
       final int row = (y * lh ~/ h).clamp(0, lh - 1) * lw;
       for (int x = 0; x < w; x++) {
         final int p = y * w + x;
-        if (depth[p] >= split) continue; // 非背景：不贡献颜色
+        // ★ 判据优先级：语义 mask > 深度阈值。
+        //   旧写法只看 `depth >= split`，而实测躯干深度与背景接近 → 躯干被判成
+        //   背景、参与扩散 → 背景色里混进躯干颜色 → 主体移开后露出的就是躯干
+        //   残影。这与"躯干被判进背景层"是同一根因的两处表现，故一并以 mask 为准。
+        final bool isBackground =
+            mask != null ? mask[p] <= 0.5 : depth[p] < split;
+        if (!isBackground) continue; // 非背景：不贡献颜色
         final int i = row + (x * lw ~/ w).clamp(0, lw - 1);
         final int o = p * 4;
         cr[i] += src[o];
