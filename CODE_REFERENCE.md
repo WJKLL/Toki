@@ -150,6 +150,8 @@ xiangjugong/
 | `lib/presentation/features/timetable/page_p06_timetable_page.dart` | 大课表编辑页（P-06，周网格，可横滚） | 改课表编辑交互 |
 | `lib/presentation/widgets/agreement_gate.dart` | 开屏协议门（P-07）：包住主框架，需弹 C-31 时屏蔽主界面并延迟加载 | 改协议弹出时机/入口 |
 | `lib/presentation/widgets/c31_agreement_card.dart` | 鸿蒙风格协议卡（C-31，deferred）：遮罩+动画+自适应+协议链接 | 改协议文案/样式/按钮 |
+| `lib/presentation/features/wallpaper/page_p24_spatial_wallpaper_page.dart` | **空间图片编辑器（P-24，R-20 `/spatial-wallpaper`）**：导入图片 → 深度（AI 推理 / 预设模板）→ 分层视差 → 加组件（时钟/艺术字/图案）→ 存相册 + 历史。三级工具栏（分类/工具/参数组）、主体涂刷修正、传感器/摇杆位移。<br>**★ 名字是「空间图片」不是「壁纸」**——本功能**不接系统壁纸 API**，产出的是可保存/分享的图；文件名与路由保留 wallpaper 只为不动既有引用 | 改空间图片的交互与参数。**动手前先看 §3 的 C-64 / C-67 ~ C-71**，多数样式改动落在渲染器而非页面 |
+| `lib/presentation/features/wallpaper/spatial_ui_kit.dart` | **C-71 UI 原语库**：滑条 / 开关 / 按钮 / 摇杆 / 历史卡 / 棋盘格 / 画笔轨迹等 15 件（v2.1.0 自 P-24 提取；与编辑器 State 零耦合，只吃构造参数） | 改这些控件的样式与手感 |
 
 ### 1.6 首页卡片（cards/）
 
@@ -337,10 +339,36 @@ xiangjugong/
 | C-40 | 动态参数输入 | `widgets/c40_tool_dynamic_params.dart` | 按 tools.json `params` 配置生成控件（text/number/select 胶囊；v1.35.0） |
 | C-41 | 通用结果展示 | `widgets/c41_tool_result_display.dart` | displayType 分发：image 两态/text/keyValue/list/json（v1.35.0） |
 | C-42 | 分类折叠面板 | `widgets/c42_tool_category_panel.dart` | 工具页分组：默认折叠/点击展开/懒渲染（v1.35.0） |
+| C-43 | 日期导航栏 | `widgets/c43_date_navigation.dart` | 待办页顶部，含月历（v1.43.0） |
+| C-44 | 待办任务卡片 | `widgets/c44_todo_task_card.dart` | P-10 单日列表项（v1.43.0） |
+| C-45 | 记账图标集 | `core/widgets/ledger_icons.dart` | P-20 自绘矢量图标（v1.50.0） |
+| C-46 | 账目流水卡片 | `widgets/c46_ledger_entry_card.dart` | P-20 列表项（v1.50.0） |
+| C-47 | 分类选择器 | `widgets/c47_category_picker.dart` | P-20「记一笔」（v1.50.0） |
+| C-49 | 月份导航 | `widgets/c49_month_navigation.dart` | P-20 顶部（v1.50.0） |
+| C-50 | 开屏 Gate | `widgets/c50_splash_gate.dart` | 原生式品牌开屏（v1.44.x） |
+| C-51 / C-52 | 记账剩余卡 / 支出卡 | `widgets/cards/card_ledger.dart` | 首页网格（v1.50.2） |
+| C-64 | 焦点控制器（渲染侧） | `widgets/kernel/parallax_view.dart` | 逐像素视差，P-24 用（配套 U-08 位移输入） |
+| C-64 | 分层视差 · GPU 合成 | `widgets/kernel/layered_parallax_view.dart` | 分层版，走 `shaders/layer_compose.frag` |
+| C-66 | 数字时钟渲染器 | `widgets/kernel/component_clock.dart` | P-24 组件（期 1） |
+| C-67 | 空间组件层 | `widgets/kernel/spatial_component_layer.dart` | P-24 组件定位/3D/视差/选中 |
+| C-68 | 样式化文字渲染器 | `widgets/kernel/spatial_styled_text.dart` | 发光→描边→**玻璃**→填充 四层，全部由 S-42 驱动 |
+| C-69 | 样式化图案渲染器 | `widgets/kernel/spatial_styled_image.dart` | Logo/贴纸/表情：圆形裁切/圆角/着色/投影 |
+| C-70 | 玻璃文字渲染器 | `widgets/kernel/spatial_glass_text.dart` | **「内容玻璃」**：笔画自己变玻璃（v2.1.0，见 PLAN §8） |
+| C-71 | 空间图片 UI 原语库 | `features/wallpaper/spatial_ui_kit.dart` | 滑条/开关/按钮/摇杆/历史卡等 15 件（v2.1.0 自 P-24 提取） |
 | C-22 内核组 | （无独立编号） | `widgets/kernel/*.dart` | KernelSU 1:1 复刻的底栏内核（见 §1.7） |
 | — | 块级编号 | 卡片内注释 | `#a01` 小课表（标题/当前课程/下一节）/ `#a04` 环 / `#a05` 文本 / `#a06` 点击区（剩余环→编辑器；小课表整卡→大课表）/ `#a10` 单天视图 / `#a20` 懒加载编辑器 |
 
 > C-01/C-02/C-12 为早期设计编号（主框架注释残留），现窄屏底栏由 C-22 承担、宽屏为 `MiuixNavigationRail`，无独立文件，不要去找。
+>
+> **本表的维护方式（v2.1.0 起）**：编号的唯一事实源是**代码文件第 2 行的 `// 编号：X-nn 名称`**，
+> 本表只是索引。想确认某个编号存不存在、属于哪个文件：
+> ```
+> #  列出全部已用编号（135 个文件都写了这一行）
+> grep -rn "^// 编号：" lib/
+> ```
+> 因此本表**没有列出** C-48 / C-53 ~ C-63 / C-65：上述命令无匹配，
+> 即当前代码里确实没用到这些编号（规划过但未落地，或已并入他项），不要去找。
+> 服务 / 工具 / 数据类的编号（S-nn、U-nn、A-nn、PLAT-nn、D-nn）不在此表，同样按上面的命令查。
 
 ---
 

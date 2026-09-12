@@ -20,6 +20,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 
 import '../../../domain/entities/spatial_style.dart';
+import 'spatial_glass_text.dart';
 
 /// 用 [SpatialStyle] 渲染一段文字。
 class SpatialStyledText extends StatelessWidget {
@@ -67,7 +68,8 @@ class SpatialStyledText extends StatelessWidget {
 
   Widget _render(BuildContext context, String text) {
     final bool need = style.strokeWidth > 0 || style.glowRadius > 0 ||
-        style.isGradient || style.hasPlate || style.shadowBlur > 0;
+        style.isGradient || style.hasPlate || style.shadowBlur > 0 ||
+        style.contentGlass > 0;
 
     // 没有任何"花活"时走最省的一条：单个 Text。
     if (!need) {
@@ -120,24 +122,45 @@ class SpatialStyledText extends StatelessWidget {
       );
     }
 
+    // ②.5 内容玻璃（C-70）：让**字芯本身**变成玻璃，透过笔画看见被模糊的
+    //    背景（用户原话："我需要的玻璃是字体本身变成玻璃而不是加个框"）。
+    //    它占的正是"字芯"这一层，所以下面③的实心填充必须同步淡出 ——
+    //    否则填充会把玻璃整片盖住，拉这根滑条等于没反应。
+    final double cg = style.contentGlass.clamp(0.0, 1.0);
+    if (cg > 0) {
+      layers.add(
+        SpatialGlassText(
+          text: text,
+          style: style,
+          scale: scale,
+          textAlign: textAlign,
+          // 竖排在外层已处理（传进来的 text 已逐字换行）；wrapWidth 要给，
+          // 好让玻璃层的 TextPainter 与这里的 Text 断行在同一处，两层对齐。
+          wrapWidth: wrapWidth,
+          intensity: cg,
+        ),
+      );
+    }
+
     // ③ 填充（阴影挂在它上面，避免和描边/发光各画一次）
     final Widget fill = Text(
       text,
       textAlign: textAlign,
       style: _base(scale: scale, withShadow: true),
     );
+    final Widget painted = style.isGradient
+        ? ShaderMask(
+            blendMode: BlendMode.srcIn,
+            shaderCallback: (Rect r) => LinearGradient(
+              begin: _align(style.gradientAngle, from: true),
+              end: _align(style.gradientAngle, from: false),
+              colors: <Color>[style.color, style.gradientEnd!],
+            ).createShader(r),
+            child: fill,
+          )
+        : fill;
     layers.add(
-      style.isGradient
-          ? ShaderMask(
-              blendMode: BlendMode.srcIn,
-              shaderCallback: (Rect r) => LinearGradient(
-                begin: _align(style.gradientAngle, from: true),
-                end: _align(style.gradientAngle, from: false),
-                colors: <Color>[style.color, style.gradientEnd!],
-              ).createShader(r),
-              child: fill,
-            )
-          : fill,
+      cg > 0 ? Opacity(opacity: 1 - cg, child: painted) : painted,
     );
 
     Widget content = Stack(

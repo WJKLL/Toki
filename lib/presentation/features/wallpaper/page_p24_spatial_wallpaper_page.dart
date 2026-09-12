@@ -2543,7 +2543,8 @@ class _PageP24SpatialWallpaperPageState
     return _textCtrl;
   }
 
-  List<Widget> _buildComponentControls(MiuixColors colors, bool hasImage) {    if (!hasImage) return const <Widget>[];
+  List<Widget> _buildComponentControls(MiuixColors colors, bool hasImage) {
+    if (!hasImage) return const <Widget>[];
     final SpatialComponent? c = _selected;
     if (c == null) {
       return <Widget>[
@@ -2624,6 +2625,23 @@ class _PageP24SpatialWallpaperPageState
           max: 90,
           onValueChange: (double v) => _updateSelected(
             (SpatialComponent x) => x.copyWith(style: x.style.copyWith(fontSize: v)),
+          ),
+        ),
+        // ★「内容玻璃」与下面的「组件外壳」是**两件不同的事**，所以名字
+        //   必须不一样，否则用户会以为是同一个东西（PLAN §8.3 第 3 条）：
+        //     · 内容玻璃 = 笔画自己变玻璃，透过字看见被模糊的背景 ← 用户要的
+        //     · 组件外壳 = 给组件垫一块玻璃底（卡片感）
+        SpatialMiSlider(
+          title: '内容玻璃',
+          summary: c.style.contentGlass <= 0.01
+              ? '关闭'
+              : '${(c.style.contentGlass * 100).round()}%',
+          value: c.style.contentGlass,
+          min: 0,
+          max: 1,
+          onValueChange: (double v) => _updateSelected(
+            (SpatialComponent x) =>
+                x.copyWith(style: x.style.copyWith(contentGlass: v)),
           ),
         ),
         SpatialMiSlider(

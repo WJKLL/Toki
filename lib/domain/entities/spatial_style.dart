@@ -47,6 +47,7 @@ class SpatialStyle {
     this.plateRadius = 18,
     this.platePadding = 0,
     this.opacity = 1,
+    this.contentGlass = 0,
   });
 
   /// 字体族；null = 跟随系统默认。字体的运行时加载（.ttf/.otf 导入）另开一期，
@@ -93,6 +94,20 @@ class SpatialStyle {
   /// 整体不透明度。
   final double opacity;
 
+  /// 「内容玻璃」0..1（C-70）——**让笔画自己变成玻璃**。
+  ///
+  /// ★ 和 [plateColor] 的胶囊底、以及 `SpatialComponent.glass` 的组件外壳
+  ///   是【三条不同的路】，UI 上必须分开命名，否则用户会以为是同一个东西：
+  ///     · `SpatialComponent.glass`  = 给组件垫一块玻璃底（卡片感）
+  ///     · [plateColor]              = 把字放在一枚胶囊/贴纸里
+  ///     · **本字段**                = 字与图案**自己**是玻璃，
+  ///                                   背后的画面透过笔画被模糊（用户原话：
+  ///                                   "我需要的玻璃是字体本身变成玻璃而不是加个框"）
+  ///
+  /// 0 = 关闭；越大模糊越强。它同时把字形填充**淡出**（1 - contentGlass），
+  /// 否则实心填充会把玻璃层整个盖住 —— 那样拉这个滑条等于没反应。
+  final double contentGlass;
+
   /// 是否是渐变。
   bool get isGradient => gradientEnd != null;
 
@@ -121,6 +136,7 @@ class SpatialStyle {
     double? plateRadius,
     double? platePadding,
     double? opacity,
+    double? contentGlass,
   }) {
     return SpatialStyle(
       fontFamily: fontFamily ?? this.fontFamily,
@@ -142,6 +158,7 @@ class SpatialStyle {
       plateRadius: plateRadius ?? this.plateRadius,
       platePadding: platePadding ?? this.platePadding,
       opacity: opacity ?? this.opacity,
+      contentGlass: contentGlass ?? this.contentGlass,
     );
   }
 }
@@ -211,10 +228,31 @@ abstract final class SpatialStylePresets {
     letterSpacing: 0.5,
   );
 
+  /// 玻璃字：**笔画自己就是玻璃**（C-70）——
+  /// 透过字看见被模糊的背景，而不是给字垫一个框。
+  ///
+  /// ★ 和上面「玻璃」预设的区别（名字必须能区分开，否则用户会以为是同一个）：
+  ///   · 「玻璃」  = 给字垫一层半透明胶囊底 → 贴纸 / 卡片感
+  ///   · 「玻璃字」= 字本身是玻璃       → 用户要的那种
+  ///   留一层很淡的描边与发光，是为了让玻璃字压在亮背景上也仍看得见轮廓
+  ///   （纯玻璃在亮背景上会"消失"，这是玻璃字的通病）。
+  static const SpatialStyle glassText = SpatialStyle(
+    fontWeight: 700,
+    fontSize: 46,
+    color: Color(0xFFFFFFFF),
+    contentGlass: 1,
+    strokeWidth: 1.5,
+    strokeColor: Color(0x59FFFFFF),
+    glowRadius: 10,
+    glowColor: Color(0x4DFFFFFF),
+    letterSpacing: 1,
+  );
+
   /// 预设清单：(名字, 样式)。UI 直接遍历它出按钮。
   static const List<(String, SpatialStyle)> all = <(String, SpatialStyle)>[
     ('极简', minimal),
     ('玻璃', glass),
+    ('玻璃字', glassText),
     ('霓虹', neon),
     ('手账', journal),
     ('描边字', outlined),
