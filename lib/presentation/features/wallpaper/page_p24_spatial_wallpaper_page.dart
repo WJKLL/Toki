@@ -342,6 +342,19 @@ class _PageP24SpatialWallpaperPageState
   ///   选一组就只显示那一组的工具。分类里工具本来就少时不显示（见 _subGroups）。
   int _groupTab = 0;
 
+  /// 画布视图：缩放倍率 + 中心点（归一化，0.5 = 居中）。
+  ///
+  /// ★ 为什么给显式控件而不是只靠手势
+  ///   双指缩放在【涂刷模式】下会被笔刷的 pan 手势抢走，而涂刷恰恰是最需要
+  ///   放大的场景（用户反馈："所以画布的双指放大缩小呢？你不行就做个滑条，
+  ///   而且可以移动中心"）。控件任何模式下都能用，手势也仍然保留 ——
+  ///   两者写的是同一个 _zoomCtrl。
+  double _viewScale = 1.0;
+  Offset _viewCenter = const Offset(0.5, 0.5);
+
+  /// 画布实际尺寸（LayoutBuilder 里记下来，算变换矩阵要用）。
+  Size _stageSize = Size.zero;
+
   /// 一级分类 → (组名, 该组包含的二级索引)。没有条目的分类不显示三级行。
   static const Map<int, List<(String, List<int>)>> _subGroups =
       <int, List<(String, List<int>)>>{
@@ -1374,6 +1387,8 @@ class _PageP24SpatialWallpaperPageState
             child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c) {
               final Size size = c.biggest;
+              // 记下画布尺寸：视图缩放/平移要按它算变换矩阵
+              _stageSize = size;
               // ★ 由【目标层间差】反推总位移：层间差 = 总位移×(1−ratio)/(层数−1)。
               //   锁定层间差而不是总位移，2/3/4 层下的观感才一致；_amountMax 兜住
               //   层数多时总幅度失控的情况。
@@ -1756,6 +1771,57 @@ class _PageP24SpatialWallpaperPageState
 
           // ══════════ 2 空间 · 二级 0「晃动来源」══════════
           if (_toolTab == 2 && _subTab == 0) ...<Widget>[
+            // ── ★ 画布视图：缩放 + 移动中心 ──
+            //   为什么不做成纯手势：双指缩放在涂刷模式下会被笔刷的 pan 抢走，
+            //   而涂刷正是最需要放大的场景。显式控件任何模式下都能用。
+            _MiSlider(
+              title: '画布缩放',
+              summary: '${_viewScale.toStringAsFixed(2)}×',
+              value: _viewScale,
+              min: 1,
+              max: 5,
+              onValueChange: (double v) {
+                setState(() => _viewScale = v);
+                _applyView();
+              },
+            ),
+            const SizedBox(height: 4),
+            MiuixText(
+              '移动中心 —— 拖这个盘选择要放大看的位置',
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: colors.onSurfaceVariantSummary,
+            ),
+            const SizedBox(height: 6),
+            _JoystickPad(
+              value: Offset(
+                (_viewCenter.dx - 0.5) * 2,
+                (_viewCenter.dy - 0.5) * 2,
+              ),
+              onChanged: (Offset v) {
+                setState(() {
+                  _viewCenter = Offset(
+                    (0.5 + v.dx * 0.5).clamp(0.0, 1.0),
+                    (0.5 + v.dy * 0.5).clamp(0.0, 1.0),
+                  );
+                });
+                _applyView();
+              },
+            ),
+            const SizedBox(height: 6),
+            Center(
+              child: _MiButton(
+                key: const ValueKey<String>('wallpaper.view.reset'),
+                onPressed: () {
+                  setState(() {
+                    _viewScale = 1.0;
+                    _viewCenter = const Offset(0.5, 0.5);
+                  });
+                  _applyView();
+                },
+                child: const Text('重置视图'),
+              ),
+            ),
+            const SizedBox(height: 10),
             // ── ★ 晃动来源（S-41）：自动 / 手机传感器 / 摇杆 ──
             MiuixText(
               '晃动来源',
@@ -2046,6 +2112,22 @@ class _PageP24SpatialWallpaperPageState
   /// 工具行（对齐系统相册编辑器：图标+文字、选中态高亮、再点一次收起）。
   ///
   /// 收起的价值：画面能拿回那 30% 的高度（相册编辑器也允许工具行隐藏）。
+  /// 应用画布视图（缩放 + 中心）—— 直接构造 InteractiveViewer 的变换矩阵。
+  ///
+  /// child 点 p 经过 `scale(sc)` 再 `translate(t)` 后要落在视口中心：
+  ///     sc·p + t = 0.5·W   ⇒   t = 0.5·W − sc·p
+  /// 其中 p 由归一化中心点换算：p = center × 画布尺寸。
+  void _applyView() {
+    final Size s = _stageSize;
+    if (s.isEmpty) return;
+    final double sc = _viewScale;
+    final double tx = s.width * 0.5 - _viewCenter.dx * s.width * sc;
+    final double ty = s.height * 0.5 - _viewCenter.dy * s.height * sc;
+    _zoomCtrl.value = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(sc, sc, sc, 1);
+  }
+
   /// 一级分类（最底部一行）。
   static const List<(int, String, String)> _categories =
       <(int, String, String)>[
