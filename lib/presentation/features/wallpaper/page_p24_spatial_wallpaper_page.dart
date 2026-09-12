@@ -355,6 +355,10 @@ class _PageP24SpatialWallpaperPageState
   /// 画布实际尺寸（LayoutBuilder 里记下来，算变换矩阵要用）。
   Size _stageSize = Size.zero;
 
+  /// 双指缩放开始时的倍率（捏合的基准），以及单指笔迹是否已起笔。
+  double _pinchBase = 1.0;
+  bool _strokeStarted = false;
+
   /// 一级分类 → (组名, 该组包含的二级索引)。没有条目的分类不显示三级行。
   static const Map<int, List<(String, List<int>)>> _subGroups =
       <int, List<(String, List<int>)>>{
@@ -1399,16 +1403,28 @@ class _PageP24SpatialWallpaperPageState
               );
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
-                // ★ 双指缩放恒开（原实现只在涂刷模式下开 —— 用户反馈
-                //   "画布无法双指放大"）。放大后要能拖动看细节，所以非涂刷
-                //   模式下把 pan 也打开；涂刷模式下仍保持 pan=false，
-                //   把单指留给笔刷（否则一划就把画面拖走、画不上）。
-                child: InteractiveViewer(
-                  transformationController: _zoomCtrl,
-                  panEnabled: _brushMode == 0,
-                  scaleEnabled: true,
-                  minScale: 1,
-                  maxScale: 5,
+                // ★★ 缩放/平移改成【自己套变换】，不再依赖 InteractiveViewer
+                //   的控制器 —— 那条链路受它内部的边界钳制影响，实际表现就是
+                //   "滑条动了画面不动"（用户反馈："放大缩小怎么还没修"）。
+                //   现在直接算：先缩放，再把「中心点」挪到视口正中，所见即所得。
+                //
+                //   手势也不再交给 InteractiveViewer —— 它在涂刷模式下会和
+                //   笔刷的 pan 抢同一个手势。改为一套 onScale*：
+                //     双指 → 缩放 + 平移中心；单指 + 涂刷 → 画；单指 → 设焦点。
+                //   ⚠️ GestureDetector 不允许 onPan* 与 onScale* 同时使用
+                //      （scale 是 pan 的超集，Flutter 会断言失败），
+                //      所以原来那两个 onPanStart/onPanUpdate 必须去掉，
+                //      单指笔迹改走 onScale* 的 pointerCount == 1 分支。
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..translateByDouble(
+                      (0.5 - _viewCenter.dx) * size.width * _viewScale,
+                      (0.5 - _viewCenter.dy) * size.height * _viewScale,
+                      0,
+                      1,
+                    )
+                    ..scaleByDouble(_viewScale, _viewScale, _viewScale, 1),
                   child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   // ★ 涂刷模式下画面手势整体让位给笔刷 —— 否则点一下就会顺手
@@ -1416,16 +1432,38 @@ class _PageP24SpatialWallpaperPageState
                   onTapUp: _brushMode > 0
                       ? null
                       : (TapUpDetails d) => _setFocusAt(d.localPosition, size),
-                  onPanStart: _brushMode > 0
-                      ? (DragStartDetails d) =>
-                          _brushMove(d.localPosition, size, first: true)
-                      : null,
-                  onPanUpdate: _brushMode > 0
-                      ? (DragUpdateDetails d) =>
-                          _brushMove(d.localPosition, size)
-                      : (DragUpdateDetails d) => _moveFocusBy(d.delta, size),
-                  onPanEnd:
-                      _brushMode > 0 ? (DragEndDetails _) => _commitBrush() : null,
+                  onScaleStart: (ScaleStartDetails d) {
+                    _pinchBase = _viewScale;
+                    _strokeStarted = false;
+                  },
+                  onScaleUpdate: (ScaleUpdateDetails d) {
+                    if (d.pointerCount >= 2) {
+                      setState(() {
+                        _viewScale = (_pinchBase * d.scale).clamp(1.0, 5.0);
+                        _viewCenter = Offset(
+                          (_viewCenter.dx - d.focalPointDelta.dx / size.width)
+                              .clamp(0.0, 1.0),
+                          (_viewCenter.dy - d.focalPointDelta.dy / size.height)
+                              .clamp(0.0, 1.0),
+                        );
+                      });
+                      return;
+                    }
+                    if (_brushMode > 0) {
+                      _brushMove(
+                        d.localFocalPoint,
+                        size,
+                        first: !_strokeStarted,
+                      );
+                      _strokeStarted = true;
+                    } else {
+                      // 非涂刷模式下单指拖动 = 移动焦点（原 onPanUpdate 的行为）
+                      _moveFocusBy(d.focalPointDelta, size);
+                    }
+                  },
+                  onScaleEnd: (ScaleEndDetails d) {
+                    if (_brushMode > 0 && _strokeStarted) _commitBrush();
+                  },
                   child: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
