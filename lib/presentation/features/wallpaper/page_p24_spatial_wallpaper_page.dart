@@ -30,6 +30,8 @@ import '../../../core/depth/onnx_subject_segmentation.dart';
 import '../../../core/depth/subject_edit_mask.dart';
 import '../../../core/depth/subject_segmentation.dart';
 import '../../../core/platform/contract/plat_file_ops.dart';
+import '../../../core/spatial/sensors_plus_tilt_source.dart';
+import '../../../core/spatial/tilt_input_source.dart';
 import '../../../core/wallpaper/depth_template_renderer.dart';
 import '../../../core/wallpaper/wallpaper_history_service.dart';
 import '../../../domain/entities/depth_template.dart';
@@ -308,6 +310,19 @@ class _PageP24SpatialWallpaperPageState
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
   bool _showDepth = false;
   bool _autoWobble = true;
+
+  /// 晃动来源：0 = 自动轨迹，1 = 手机传感器，2 = 摇杆。
+  ///
+  /// ★ 为什么要有「自动」这一档
+  ///   导出 / 演示 / 没有传感器的设备都要有个能自己动起来的东西；
+  ///   而且它还是另外两档的**降级去处** —— 传感器不可用就退回这里。
+  int _inputMode = 0;
+  static const List<String> _inputModeLabels = <String>['自动', '传感器', '摇杆'];
+
+  /// 传感器 / 摇杆给出的归一化倾斜量（-1..1）。三者统一在 _currentShift() 汇合。
+  Offset _sensorShift = Offset.zero;
+  Offset _joystickShift = Offset.zero;
+  StreamSubscription<Offset>? _tiltSub;
   bool _busy = false;
 
   // ── 组件（S-38 / C-67 · PLAN_components_v1.53.md 期 1）──────────
@@ -347,6 +362,9 @@ class _PageP24SpatialWallpaperPageState
     // S-39：注册主体分割实现。鸿蒙不注册 → Registry.instance 为 null →
     // DepthLayerSplitter 自动退回纯深度分层，页面不抛异常。
     SubjectSegmentationRegistry.register(OnnxSubjectSegmentation.instance);
+    // S-41：注册倾斜输入源。鸿蒙镜像不注册 → Registry.instance 为 null →
+    // 页面把「传感器」判为不可用并退回自动晃动，不会抛异常。
+    TiltInputSourceRegistry.register(SensorsPlusTiltSource());
     _ticker = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4200),
@@ -356,6 +374,9 @@ class _PageP24SpatialWallpaperPageState
 
   @override
   void dispose() {
+    // ★ 必须退订：传感器在页面关掉后还在跑是纯粹的耗电（§11.2）。
+    unawaited(_tiltSub?.cancel() ?? Future<void>.value());
+    _tiltSub = null;
     _ticker.dispose();
     _zoomCtrl.dispose();
     _maskImage?.dispose();
@@ -371,6 +392,78 @@ class _PageP24SpatialWallpaperPageState
     final double a = t * 2 * math.pi;
     // 只返回【单位方向】—— 幅度由 uAmount（像素）承担，避免双重缩放。
     return Offset(math.sin(a), math.cos(a * 0.72) * 0.62);
+  }
+
+  // ── 晃动来源（S-41）：自动 / 传感器 / 摇杆 ────────────────
+  //
+  // 三者统一输出【归一化方向】(-1..1)，幅度仍由 uAmount（像素）承担 ——
+  // 这样三种来源的观感尺度一致，切到真机倾斜也不会突然变猛。
+
+  /// 当前生效的晃动方向。所有渲染路径都从这里取值。
+  Offset _currentShift() {
+    switch (_inputMode) {
+      case 1:
+        return _sensorShift;
+      case 2:
+        return _joystickShift;
+      default:
+        return _autoWobble ? _shiftAt(_ticker.value) : Offset.zero;
+    }
+  }
+
+  void _setInputMode(int m) {
+    if (m == _inputMode) return;
+    setState(() => _inputMode = m);
+    if (m == 1) {
+      unawaited(_startSensor());
+    } else {
+      unawaited(_stopSensor());
+      // 回到「自动」时把轨迹重新跑起来（进传感器模式时它被停了）
+      if (m == 0 && _autoWobble) _ticker.repeat();
+    }
+  }
+
+  /// 切到传感器模式：停掉自动轨迹（两套驱动会打架），再订阅倾斜流。
+  Future<void> _startSensor() async {
+    _ticker.stop();
+    final TiltInputSource? src = TiltInputSourceRegistry.instance;
+    if (src == null) {
+      _fallbackToAuto('当前平台没有注册倾斜输入源');
+      return;
+    }
+    final bool ok = await src.isAvailable();
+    if (!mounted) return;
+    if (!ok) {
+      _fallbackToAuto('这台设备没有可用的加速度计');
+      return;
+    }
+    await _stopSensor();
+    // 一进来就校准零位 —— 每个人握手机的姿势不同，不校准画面一上来就是偏的。
+    src.recalibrate();
+    _tiltSub = src.stream.listen((Offset v) {
+      if (mounted) setState(() => _sensorShift = v);
+    });
+  }
+
+  Future<void> _stopSensor() async {
+    await _tiltSub?.cancel();
+    _tiltSub = null;
+  }
+
+  /// 传感器不可用 → 静默退回自动晃动，并告诉用户为什么（不静默失败）。
+  void _fallbackToAuto(String why) {
+    if (!mounted) return;
+    setState(() {
+      _inputMode = 0;
+      _aiInfo = '$why —— 已回到自动晃动';
+    });
+    if (_autoWobble) _ticker.repeat();
+  }
+
+  /// 把手机摆到舒服的位置再点 —— 以当前姿态为新的零位。
+  void _recalibrateTilt() {
+    TiltInputSourceRegistry.instance?.recalibrate();
+    if (mounted) setState(() => _aiInfo = '已把当前姿态设为零位');
   }
 
   // ── 导入图片 ────────────────────────────────────────────
@@ -1129,9 +1222,7 @@ class _PageP24SpatialWallpaperPageState
                       AnimatedBuilder(
                         animation: _ticker,
                         builder: (BuildContext context, Widget? _) {
-                          final Offset shift = _autoWobble
-                              ? _shiftAt(_ticker.value)
-                              : Offset.zero;
+                          final Offset shift = _currentShift();
                           // 有分层结果 → 「分层 + 图层平移」：层内刚体平移、
                           // 近层移开由下层内容填补 → **没有遮挡空洞/拖影**。
                           // 深度图预览时仍走 shader（要看深度本身）。
@@ -1469,14 +1560,74 @@ class _PageP24SpatialWallpaperPageState
           ], // ══════════ /3 焦点 ══════════
 
           // ══════════ 2 空间（续）══════════
-          if (_toolTab == 2)
-            MiuixSwitchPreference(
-              title: '自动晃动',
-            summary: '用正弦轨迹模拟陀螺仪输入',
-            value: _autoWobble,
-            onChanged: _toggleAutoWobble,
-            insideMargin: _itemMargin,
-          ),
+          if (_toolTab == 2) ...<Widget>[
+            // ── ★ 晃动来源（S-41）：自动 / 手机传感器 / 摇杆 ──
+            MiuixText(
+              '晃动来源',
+              style: MiuixTheme.of(context).textStyles.body1,
+              color: colors.onSurfaceVariantSummary,
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                for (int i = 0; i < _inputModeLabels.length; i++) ...<Widget>[
+                  Expanded(
+                    child: MiuixButton(
+                      key: ValueKey<String>('wallpaper.input.$i'),
+                      onPressed: () => _setInputMode(i),
+                      colors: _inputMode == i
+                          ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                          : null,
+                      child: Text(_inputModeLabels[i]),
+                    ),
+                  ),
+                  if (i != _inputModeLabels.length - 1)
+                    const SizedBox(width: 8),
+                ],
+              ],
+            ),
+            // 传感器：每个人握姿不同，随时可以重设零位
+            if (_inputMode == 1) ...<Widget>[
+              const SizedBox(height: 6),
+              MiuixButton(
+                key: const ValueKey<String>('wallpaper.tilt.calib'),
+                onPressed: _recalibrateTilt,
+                child: const Text('把当前姿态设为零位'),
+              ),
+              const SizedBox(height: 2),
+              MiuixText(
+                '把手机摆到你看屏幕的习惯姿势，再点一次上面那个按钮。',
+                style: MiuixTheme.of(context).textStyles.body2,
+                color: colors.onSurfaceVariantSummary,
+              ),
+            ],
+            // 摇杆：拖着控制方向，松手不回正（便于定住某个角度慢慢看）
+            if (_inputMode == 2) ...<Widget>[
+              const SizedBox(height: 8),
+              _JoystickPad(
+                value: _joystickShift,
+                onChanged: (Offset v) => setState(() => _joystickShift = v),
+              ),
+              const SizedBox(height: 6),
+              Center(
+                child: MiuixButton(
+                  key: const ValueKey<String>('wallpaper.joystick.center'),
+                  onPressed: () =>
+                      setState(() => _joystickShift = Offset.zero),
+                  child: const Text('回正'),
+                ),
+              ),
+            ],
+            // 自动：保留原开关（关掉 = 完全静止，便于和另外两档对比）
+            if (_inputMode == 0)
+              MiuixSwitchPreference(
+                title: '自动晃动',
+                summary: '用正弦轨迹模拟陀螺仪输入（关掉则完全静止，便于比对）',
+                value: _autoWobble,
+                onChanged: _toggleAutoWobble,
+                insideMargin: _itemMargin,
+              ),
+          ],
           // ══════════ 调试（顶部 ⋮ 展开）══════════
           // 这四个是开发工具：深度图预览走的是另一条渲染路径，只有层素材预览
           // 才反映实际参与合成的东西。收进这里，不占主面板。
@@ -2202,6 +2353,73 @@ class _HistoryTileState extends State<_HistoryTile> {
           onTap: widget.onDelete,
         ),
       ],
+    );
+  }
+}
+
+/// S-41 摇杆：拖这个盘控制晃动方向（-1..1）。
+///
+/// 为什么需要它：
+///   · Web / 桌面根本没有传感器；
+///   · 真机上也有用户不想一直举着手机晃；
+///   · 它同时也是**无障碍输入** —— 不方便动手机的人一样能用。
+///
+/// ★ 松手【不回正】：调壁纸时更需要把某个角度定住慢慢看，
+///   而不是像游戏摇杆那样弹回中间。要回正请点「回正」。
+class _JoystickPad extends StatelessWidget {
+  const _JoystickPad({required this.value, required this.onChanged});
+
+  final Offset value;
+  final ValueChanged<Offset> onChanged;
+
+  static const double _size = 132;
+  static const double _knob = 36;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    const double r = (_size - _knob) / 2;
+    return Center(
+      child: GestureDetector(
+        key: const ValueKey<String>('wallpaper.joystick'),
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (DragStartDetails d) => _report(d.localPosition, r),
+        onPanUpdate: (DragUpdateDetails d) => _report(d.localPosition, r),
+        child: Container(
+          width: _size,
+          height: _size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: colors.onSurfaceVariantSummary.withValues(alpha: 0.45),
+              width: 1.5,
+            ),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              Transform.translate(
+                offset: Offset(value.dx * r, value.dy * r),
+                child: Container(
+                  width: _knob,
+                  height: _knob,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colors.primary.withValues(alpha: 0.85),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _report(Offset local, double r) {
+    final Offset d = local - const Offset(_size / 2, _size / 2);
+    onChanged(
+      Offset((d.dx / r).clamp(-1.0, 1.0), (d.dy / r).clamp(-1.0, 1.0)),
     );
   }
 }

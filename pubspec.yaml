@@ -60,6 +60,7 @@ dependencies:
   #   DepthInferenceRegistry（见 lib/core/depth/depth_inference.dart）。
   #   镜像 pubspec 不应含本依赖；lib/core/depth/onnx_depth_inference.dart 属主项目独有。
   flutter_onnxruntime: ^1.8.5
+  sensors_plus: ^7.1.0
 
 # v1.46.0:本地 vendor 覆盖(见上注释)。
 dependency_overrides:
