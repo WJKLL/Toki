@@ -239,7 +239,11 @@ abstract final class DepthLayerSplitter {
         ? _otsuSplit(dw, 64).clamp(0.12, 0.88)
         : 0.5;
 
-    // ★★ 主体处理方式重构：改为【压平主体区域的深度】，不再改写层结构。
+    // ★★ 主体处理（第二轮修正）：主体【另立一层】，深度只负责背景。
+    //
+    //   ⚠️ 下面这段"把主体深度压平"现在只是【让主体像素不再参与深度层归属】
+    //      的手段，已经不是主体处理的主角 —— 主角是后面追加的【主体层】。
+    //      层边界由语义 mask 给，不由深度给。
     //
     //   旧做法（已废弃）：只要有 mask 就 `layerCount = 2`，并且 alpha/own 完全
     //   由 mask 决定（见下面的废弃分支）—— **深度被彻底绕过**。
@@ -364,36 +368,58 @@ abstract final class DepthLayerSplitter {
       lut.add(t);
     }
 
-    final List<DepthLayer> layers = <DepthLayer>[];
-    for (int i = 0; i < layerCount; i++) {
-      final double lo = los[i];
-      final double hi = layerCount == 2
-          ? (i == 0 ? split : 1.0)
-          : (i + 1) / layerCount;
+    // ★ 有主体时【追加一层主体层】，画在所有深度层之上。
+    //
+    //   为什么主体必须单独一层、不能靠深度切出来（本轮回归的教训）：
+    //     上一版把主体处理成"压平深度、并入深度层"，于是层边界变成由【深度】
+    //     决定 —— 而人物脚下/身前的地面在深度图上本来就近，`d > split`
+    //     就被判进主体层、跟着人一起动。
+    //     实测反馈："人物底部背景又分不开了"。
+    //     ⇒ **主体的边界必须由语义 mask 给**（它认得人），深度只管背景。
+    //
+    //   深度层则照旧：风景图的视差完全由它们提供，不受 mask 影响。
+    final bool hasSubject = mw != null;
+    final int depthLayerCount = layerCount;
+    final int totalLayers = hasSubject ? depthLayerCount + 1 : depthLayerCount;
 
-      final Float32List aOf = lut[i];
-      final Float32List? aNext = i + 1 < layerCount ? lut[i + 1] : null;
+    final List<DepthLayer> layers = <DepthLayer>[];
+    for (int i = 0; i < totalLayers; i++) {
+      final bool isSubject = hasSubject && i == depthLayerCount;
+      // 主体层给一个恒为 1 的 centerDepth —— 排序后它必定落在最后（最上层）。
+      final double lo = isSubject ? 1.0 : los[i];
+      final double hi = isSubject
+          ? 1.0
+          : (depthLayerCount == 2
+              ? (i == 0 ? split : 1.0)
+              : (i + 1) / depthLayerCount);
+
+      final Float32List? aOf = isSubject ? null : lut[i];
+      final Float32List? aNext =
+          (!isSubject && i + 1 < depthLayerCount) ? lut[i + 1] : null;
 
       final Uint8List rgba = Uint8List(w * h * 4);
       bool any = false;
       for (int p = 0; p < w * h; p++) {
         final double a;
         final double own;
-        // ★ 统一走【深度分层】—— 旧的 mask 分支已删除。
-        //
-        //   主体区域的深度已在上面被【压平成层心】，所以它整片落在同一层、
-        //   以同一速度移动（刚体、内部不拉伸），当初引入 mask 想要的效果都还在；
-        //   而背景照旧按自己的深度分层，风景图的视差不会被 mask 吞掉。
-        //
-        //   旧实现（已废弃）在这里用 mask 直接改写 alpha/own：
-        //       a   = smoothstep(0.45, 0.75, m)
-        //       own = i == 0 ? 1 - a : 1
-        //   它把深度整个绕过了 —— 一个 6.62% 的误判 mask 就能让 93% 的画面
-        //   变成一整块刚体（真机截图证实）。
-        final int bi = (dwUse[p] * (bins - 1)).round().clamp(0, bins - 1);
-        a = aOf[bi];
-        // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
-        own = aNext == null ? a : (a - aNext[bi]).clamp(0.0, 1.0);
+        // 主体锐化：isnet/modnet 输出的是 soft 概率，背景区也有 0.3~0.5 的值，
+        // 必须陡化 —— 否则背景会被三成地拉进主体层（历史实测："人物右腿背景
+        // 又跟着一起了"）。0.45~0.75 的渐变保证边缘不出锯齿。
+        final double ms = hasSubject ? _smoothstep(0.45, 0.75, mw[p]) : 0.0;
+        if (isSubject) {
+          // 主体层：整层用原图，alpha 就是 mask —— **主体边界的唯一依据**。
+          a = ms;
+          own = 1.0;
+        } else {
+          final int bi = (dwUse[p] * (bins - 1)).round().clamp(0, bins - 1);
+          a = aOf![bi];
+          // 归属：本层覆盖、且不被任何更近的层覆盖的那部分。
+          final double o = aNext == null ? a : (a - aNext[bi]).clamp(0.0, 1.0);
+          // ★ 主体像素【让位】：这些像素归主体层管，本层在这里存填充色。
+          //   否则主体层移开后，轮廓外会露出"另一个清晰的主体"
+          //   （历史实测"会露出底图主体"就是这个）。
+          own = o * (1.0 - ms);
+        }
         if (a <= 0.0) continue; // 本层不覆盖这里 → 留全透明，合成时无影响
         final int o = p * 4;
         // 本层区域用原图，其余用模糊版：避免平移后露出错位的其它层内容。
