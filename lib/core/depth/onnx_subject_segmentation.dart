@@ -5,17 +5,19 @@
 //   镜像侧经 SubjectSegmentationRegistry.register() 注入自己的实现；
 //   未注册 → Registry.instance 为 null → 调用方降级回纯深度分层。
 //
-// ★ 两个模型、自动调度（实测数据见 PLAN_components_v1.53.md）
+// ★ 两个模型、自动调度（实测数据见 PLAN_components_v1.53.md 与 diagB）
 //   两个模型互补，**不可互替**：
 //     · isnet-anime（1024 输入，int8 量化 42MB）
 //         插画：前景占比 ~50%，整个人完整抠出 ✅
 //         真人：只有 1.5%，几乎全丢 ❌
 //     · modnet（512 输入，fp32 25MB）
 //         真人：35.6%，三个人都抠出 ✅
-//         插画：只有 6%，基本失效 ❌
-//   调度：先跑 MODNet（512，快）——
-//     前景占比 ≥ 10% → 判定真人照，直接用，**只推理一次**；
-//     < 10%          → 疑似插画，再跑 isnet-anime。
+//         插画：6% 起 —— 但**覆盖率高 ≠ 抠得准**：实测它会把地面一起抠进来
+//   调度（本轮修正）：**两个都跑**，再用 isnet 的覆盖率仲裁 ——
+//     isnet ≥ 8% → 用 isnet（输入 1024，是 modnet 的两倍分辨率）；
+//     否则        → 退回 modnet（真人照）。
+//   ★ 不能用 modnet 的覆盖率当"还要不要跑 isnet"的判据：它多抠背景时覆盖率
+//     会【虚高】，反而骗过分流、跳过真正该用的 isnet。见 animeCoverageMin。
 //
 // ★ 为什么不把 isnet 降到 512 提速
 //   它的 ONNX 图里 decoder 的 skip 连接尺寸被烘焙成 1024（改成动态输入后
@@ -56,8 +58,37 @@ class OnnxSubjectSegmentation implements SubjectSegmentation {
   static const int animeSize = 1024;
   static const int portraitSize = 512;
 
-  /// 判"真人照"的前景占比阈值：低于它认为 MODNet 没抓住人，转投 isnet。
-  static const double portraitCoverageMin = 0.10;
+  /// ★ 仲裁阈值：isnet 认得出主体（覆盖率 ≥ 此值）就用它，否则退回 modnet。
+  ///
+  /// 【本轮根因修复】旧实现用 `portraitCoverageMin = 0.10` 判"真人照"，只看
+  /// modnet 的覆盖率 —— 这个判据是错的，实测 5 张图（诊断脚本
+  /// `D:\Projects\mode\yolo_work\diagB_two_models.py`，对比图在 seg_out/diagB）：
+  ///
+  ///   图          modnet cov   isnet cov   应该用    旧逻辑选了
+  ///   二次元 1       6.02%      49.93%     isnet     isnet  ✅
+  ///   二次元 2      35.41%      24.08%     isnet     modnet ❌
+  ///   真人照        35.60%       1.54%     modnet    modnet ✅
+  ///   风景 1/2       0%/0.2%    0%/0.02%   无主体     —      —
+  ///
+  /// ★ 旧判据为什么会被"骗"
+  ///   modnet 在二次元图上会把**地面**一起抠进主体 —— 那张樱花街道图的实测
+  ///   主体 mask 的 bbox 从画面左边缘 x=0 开始，左下方整片人行道都是前景。
+  ///   覆盖率因此【虚高】到 35.41%，反而超过了 10% 的门槛，被判成"真人照"、
+  ///   直接返回、**跳过了真正该用的 isnet**。
+  ///   即：模型的错误让它自己骗过了以覆盖率为唯一判据的分流。
+  ///
+  /// ★ 为什么不能靠后处理补救
+  ///   那块地面与人物在 mask 里是【连通】的，任何连通域筛选（含
+  ///   `_keepMainComponents`）都剔不掉它 —— 只能靠选对模型。
+  ///
+  /// ★ 新判据只用 isnet
+  ///   isnet 输入 1024、是 modnet 512 的两倍分辨率，认得出主体时边缘也细一倍。
+  ///   只有它认不出（真人照仅 1.54%）才退回 modnet 兜底。
+  ///
+  /// ★ 代价
+  ///   每张图都要跑 isnet（1024，比 modnet 慢）。真人照从"只推理一次"变成两次，
+  ///   换来的是"不会再选错模型" —— 这笔交易划算。
+  static const double animeCoverageMin = 0.08;
 
   final String animeAsset;
   final String portraitAsset;
@@ -84,26 +115,28 @@ class OnnxSubjectSegmentation implements SubjectSegmentation {
   Future<SubjectMask?> segment(Uint8List imageBytes) async {
     if (imageBytes.isEmpty) return null;
 
-    // ① 先跑 MODNet（512，快）—— 真人走这条就结束，只推理一次。
+    // ① MODNet（512，快）：真人照的主力，同时兼作兜底。
     final SubjectMask? portrait = await _run(
       imageBytes,
       portraitSize,
       imagenet: false,
     );
-    if (portrait != null && portrait.coverage >= portraitCoverageMin) {
-      return portrait;
-    }
 
-    // ② 疑似插画 → 再跑 isnet-anime。
+    // ② isnet-anime（1024）：**必须跑** —— 不能靠 modnet 的覆盖率去猜。
+    //    旧实现在 modnet 覆盖率高时直接 return，漏掉的正是这一步：二次元图
+    //    被 modnet 多抠进地面、覆盖率虚高，于是选错了模型（实测表见
+    //    animeCoverageMin 的注释）。
     final SubjectMask? anime = await _run(
       imageBytes,
       animeSize,
       imagenet: true,
     );
-    if (anime != null) return anime;
 
-    // ③ isnet 不可用/失败 → 用 MODNet 的结果兜底（哪怕是低覆盖，也比没有强）。
-    return portrait;
+    // ③ 仲裁：isnet 认出了主体就用它（分辨率是 modnet 的两倍，边缘更细，
+    //    插画上更准）；它认不出（真人照仅 1.54%）才退回 modnet。
+    if (anime != null && anime.coverage >= animeCoverageMin) return anime;
+    if (portrait != null && portrait.coverage > 0) return portrait;
+    return anime ?? portrait;
   }
 
   // ── 会话加载 ────────────────────────────────────────────
