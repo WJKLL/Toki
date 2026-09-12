@@ -29,6 +29,8 @@ class SpatialStyledText extends StatelessWidget {
     required this.style,
     this.scale = 1,
     this.textAlign = TextAlign.center,
+    this.vertical = false,
+    this.wrapWidth = 0,
   });
 
   final String text;
@@ -40,8 +42,30 @@ class SpatialStyledText extends StatelessWidget {
 
   final TextAlign textAlign;
 
+  /// **竖排**（一个字一行）—— 中文 / 日文题字常用。
+  ///
+  /// ★ 为什么不做成"旋转 90°"：那样标点与英文会被一起转过去，看着是错的。
+  ///   竖排的正确做法是逐字换行，标点保持正立。
+  final bool vertical;
+
+  /// 自动换行宽度（逻辑像素）；0 = 不限制。
+  final double wrapWidth;
+
   @override
   Widget build(BuildContext context) {
+    // ★ 竖排 = 逐字换行。用换行符而不是把整块旋转 ——
+    //   旋转会把标点与英文一起转过去，看着是错的（见字段说明）。
+    final String shown = vertical ? text.split('').join('\n') : text;
+    final Widget out = _render(context, shown);
+    if (wrapWidth <= 0) return out;
+    // 自动换行宽度：由调用方按画布宽度给（组件层知道画布多宽，这里不知道）。
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: wrapWidth),
+      child: out,
+    );
+  }
+
+  Widget _render(BuildContext context, String text) {
     final bool need = style.strokeWidth > 0 || style.glowRadius > 0 ||
         style.isGradient || style.hasPlate || style.shadowBlur > 0;
 
