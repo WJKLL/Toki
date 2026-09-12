@@ -31,6 +31,7 @@ import '../../../core/depth/subject_edit_mask.dart';
 import '../../../core/depth/subject_segmentation.dart';
 import '../../../core/platform/contract/plat_file_ops.dart';
 import '../../../core/wallpaper/depth_template_renderer.dart';
+import '../../../core/wallpaper/wallpaper_history_service.dart';
 import '../../../domain/entities/depth_template.dart';
 import '../../../domain/entities/spatial_component.dart';
 import '../../../core/widgets/app_icons.dart';
@@ -157,6 +158,14 @@ class _PageP24SpatialWallpaperPageState
   /// 分层结果。**非空 = 走「分层 + 图层平移」渲染**（无拖影）；
   /// 空 = 回退到 shader 逐像素位移（几何模板，或分层失败）。
   DepthLayerSet? _layerSet;
+
+  /// S-40：当前图片对应的历史条目 ID（导入时创建）。
+  /// 点「保存到相册」时会把成片写回这条记录，历史里就能直接导出它。
+  String? _historyId;
+
+  /// 历史面板是否展开 + 当前列表。
+  bool _historyOpen = false;
+  List<WallpaperHistoryEntry> _historyEntries = <WallpaperHistoryEntry>[];
 
   /// 分层数 2~6。默认 2：主体 / 背景两块 —— 边界只有一条，最不容易出现
   /// "多层叠加发白"与"画面被切成几条"的问题；要更细的纵深再往上调。
@@ -377,6 +386,17 @@ class _PageP24SpatialWallpaperPageState
         img.dispose();
         return;
       }
+      // ★ S-40：导入即入历史 —— 源图落盘，用户之后可在「历史」里导出或删除。
+      //   add() 内部失败只 return null，绝不阻断导入。
+      final WallpaperHistoryEntry? entry =
+          await WallpaperHistoryService.instance.add(
+        source: f.bytes,
+        name: f.name,
+      );
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
       setState(() {
         _photo?.dispose();
         _photo = img;
@@ -387,6 +407,8 @@ class _PageP24SpatialWallpaperPageState
         _subjectMask = null;
         _layerSet?.dispose();
         _layerSet = null;
+        // 换图 → 成片也要写到新那条历史上，不能落到上一张头上。
+        _historyId = entry?.id;
       });
       await _rebuildDepth();
     } catch (e) {
@@ -826,15 +848,21 @@ class _PageP24SpatialWallpaperPageState
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     SizedBox(height: padding.top),
-                    Expanded(child: _buildStage(colors)),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: maxPanel),
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: _buildControls(colors),
+                    // ★ 历史面板打开时【替代】编辑区占满页面 —— 相当于相册
+                    //   编辑器里"进入某个子视图"：画面/参数/工具行整体让位。
+                    if (_historyOpen)
+                      Expanded(child: _buildHistoryPanel(colors))
+                    else ...<Widget>[
+                      Expanded(child: _buildStage(colors)),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: maxPanel),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: _buildControls(colors),
+                        ),
                       ),
-                    ),
-                    _buildToolBar(colors),
+                      _buildToolBar(colors),
+                    ],
                     SizedBox(height: padding.bottom),
                   ],
                 ),
@@ -843,6 +871,160 @@ class _PageP24SpatialWallpaperPageState
           );
         },
       ),
+    );
+  }
+
+  // ── S-40 编辑历史（草稿箱）────────────────────────────────
+  //
+  // ★ 为什么要有它（用户反馈："导入的图片后缓存会一直在"）
+  //   之前每次导入都只是在内存里换一张 ui.Image：既没有可回看的记录，
+  //   也没有任何清理入口 —— 缓存只增不减、用户无从处置。
+  //   现在每次导入都会落盘成一条历史，服务侧另有 **20 条上限自动清理**，
+  //   即使你想不起来删，它也不会无限涨。
+
+  /// 打开历史面板。
+  Future<void> _openHistory() async {
+    final List<WallpaperHistoryEntry> list =
+        await WallpaperHistoryService.instance.list();
+    if (!mounted) return;
+    setState(() {
+      _historyEntries = list;
+      _historyOpen = true;
+    });
+  }
+
+  Future<void> _refreshHistory() async {
+    final List<WallpaperHistoryEntry> list =
+        await WallpaperHistoryService.instance.list();
+    if (!mounted) return;
+    setState(() => _historyEntries = list);
+  }
+
+  /// 把某条历史的【成片】导出到系统相册；没有成片就退回源图。
+  Future<void> _exportHistory(WallpaperHistoryEntry e) async {
+    final Uint8List? bytes =
+        await WallpaperHistoryService.readFile(e.previewPath);
+    if (bytes == null) return;
+    final String name =
+        'toki_spatial_${e.savedAt.millisecondsSinceEpoch}.png';
+    final String? msg = await PlatFileOpsRegistry.instance
+        .saveImageToGallery(bytes: bytes, fileName: name);
+    if (!mounted) return;
+    setState(() => _aiInfo = msg ?? '已导出到相册');
+  }
+
+  Future<void> _deleteHistory(WallpaperHistoryEntry e) async {
+    await WallpaperHistoryService.instance.delete(e.id);
+    // 删掉的正好是当前在编辑的那张 → 只断开关联，不粗暴清屏。
+    if (_historyId == e.id) _historyId = null;
+    await _refreshHistory();
+  }
+
+  /// 载入某条历史继续编辑（重新跑一次 AI 深度）。
+  Future<void> _loadHistory(WallpaperHistoryEntry e) async {
+    final Uint8List? bytes =
+        await WallpaperHistoryService.readFile(e.srcPath);
+    if (bytes == null || !mounted) return;
+    try {
+      final ui.Image img = await decodeImageFromList(bytes);
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
+      setState(() {
+        _historyOpen = false;
+        _historyId = e.id;
+        _photo?.dispose();
+        _photo = img;
+        _photoBytes = bytes;
+        _aiDepth = false;
+        _aiInfo = '';
+        _subjectMask = null;
+        _layerSet?.dispose();
+        _layerSet = null;
+      });
+      await _rebuildDepth();
+    } catch (err) {
+      debugPrint('🔴 S-40 载入历史失败: $err');
+    }
+  }
+
+  static String _fmtTime(DateTime t) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} '
+        '${two(t.hour)}:${two(t.minute)}';
+  }
+
+  static String _fmtSize(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1024).round()} KB';
+  }
+
+  /// 历史面板：替代编辑区占满页面（相册编辑器里「进入某个子视图」的观感）。
+  Widget _buildHistoryPanel(MiuixColors colors) {
+    final List<WallpaperHistoryEntry> list = _historyEntries;
+    final body1 = MiuixTheme.of(context).textStyles.body1;
+    final body2 = MiuixTheme.of(context).textStyles.body2;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+          child: Row(
+            children: <Widget>[
+              MiuixText('编辑历史', style: body1),
+              const Spacer(),
+              MiuixText(
+                '${list.length} / ${WallpaperHistoryService.maxEntries}',
+                style: body2,
+                color: colors.onSurfaceVariantSummary,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: MiuixText(
+            '点一条继续编辑 · 右侧可导出到相册或删除（删除会一并清掉缓存文件）',
+            style: body2,
+            color: colors.onSurfaceVariantSummary,
+          ),
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: MiuixText(
+                      '还没有记录。\n导入一张图片，它就会出现在这里。',
+                      style: body2,
+                      color: colors.onSurfaceVariantSummary,
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  itemCount: list.length,
+                  separatorBuilder: (BuildContext c, int i) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (BuildContext c, int i) {
+                    final WallpaperHistoryEntry e = list[i];
+                    return _HistoryTile(
+                      key: ValueKey<String>('wallpaper.history.${e.id}'),
+                      entry: e,
+                      timeText: _fmtTime(e.savedAt),
+                      sizeText: _fmtSize(e.sizeBytes),
+                      isCurrent: e.id == _historyId,
+                      onOpen: () => unawaited(_loadHistory(e)),
+                      onExport: () => unawaited(_exportHistory(e)),
+                      onDelete: () => unawaited(_deleteHistory(e)),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -865,6 +1047,12 @@ class _PageP24SpatialWallpaperPageState
           icon: appIcon('image'),
           tooltip: '导入图片',
           onTap: () => unawaited(_pickPhoto()),
+        ),
+        C21CapsuleIconButton(
+          key: const ValueKey<String>('wallpaper.history'),
+          icon: appIcon('tasks'),
+          tooltip: '编辑历史',
+          onTap: () => unawaited(_openHistory()),
         ),
         C21CapsuleIconButton(
           key: const ValueKey<String>('wallpaper.save'),
@@ -1475,49 +1663,105 @@ class _PageP24SpatialWallpaperPageState
   /// 工具行（对齐系统相册编辑器：图标+文字、选中态高亮、再点一次收起）。
   ///
   /// 收起的价值：画面能拿回那 30% 的高度（相册编辑器也允许工具行隐藏）。
+  /// 底部工具行（对齐系统相册编辑器）：
+  /// **图标 + 文字、横向可滚动、选中用主题色**，末尾一个 ✓ 收起参数面板。
+  ///
+  /// 与上一版的差别：原来是 6 个等宽文字按钮挤在一行，再加一个工具就得再挤一轮；
+  /// 改成横向滚动之后，以后要加「滤镜 / 模板」之类不必再动布局。
   Widget _buildToolBar(MiuixColors colors) {
-    const List<(int, String)> tools = <(int, String)>[
-      (1, '主体'),
-      (2, '空间'),
-      (3, '焦点'),
-      (4, '组件'),
-      (5, '导出'),
+    // (id, 标签, 图标名) —— 图标名都取自 app_icons 里已有的集合。
+    const List<(int, String, String)> tools = <(int, String, String)>[
+      (1, '主体', 'edit'),
+      (2, '空间', 'layers'),
+      (3, '焦点', 'tune'),
+      (4, '组件', 'add'),
+      (5, '导出', 'download'),
     ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-      child: Row(
+    return SizedBox(
+      height: 64,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         children: <Widget>[
-          for (final (int id, String label) in tools)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: MiuixButton(
-                  key: ValueKey<String>('wallpaper.tab.$id'),
-                  onPressed: () => setState(() {
-                    _toolTab = _toolTab == id ? 0 : id;
-                    // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
-                    // 用户回去想点画面设焦点会发现点不动。
-                    if (_toolTab != 1) _brushMode = 0;
-                  }),
-                  colors: _toolTab == id
-                      ? MiuixButtonDefaults.buttonColorsPrimary(context)
-                      : null,
-                  child: Text(label),
+          for (final (int id, String label, String icon) in tools)
+            _toolItem(id, label, icon, colors),
+          _toolItem(-1, '调试', 'info', colors, debug: true),
+          // ✓ 完成 —— 相册编辑器工具行末尾的确认键，收起参数面板。
+          if (_toolTab != 0)
+            GestureDetector(
+              key: const ValueKey<String>('wallpaper.tab.confirm'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() {
+                _toolTab = 0;
+                _brushMode = 0;
+              }),
+              child: SizedBox(
+                width: 60,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    MiuixIcon(
+                      vector: MiuixIcons.basic.check,
+                      size: 26,
+                      tint: colors.primary,
+                    ),
+                    const SizedBox(height: 3),
+                    MiuixText(
+                      '完成',
+                      style: MiuixTheme.of(context).textStyles.body2,
+                      color: colors.primary,
+                    ),
+                  ],
                 ),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 3),
-            child: MiuixButton(
-              key: const ValueKey<String>('wallpaper.tab.debug'),
-              onPressed: () => setState(() => _debugOpen = !_debugOpen),
-              colors: _debugOpen
-                  ? MiuixButtonDefaults.buttonColorsPrimary(context)
-                  : null,
-              child: const Text('调试'),
-            ),
-          ),
         ],
+      ),
+    );
+  }
+
+  /// 工具行的一项：上图下文，选中用主题色。
+  Widget _toolItem(
+    int id,
+    String label,
+    String icon,
+    MiuixColors colors, {
+    bool debug = false,
+  }) {
+    final bool on = debug ? _debugOpen : _toolTab == id;
+    return GestureDetector(
+      key: ValueKey<String>(
+        debug ? 'wallpaper.tab.debug' : 'wallpaper.tab.$id',
+      ),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() {
+        if (debug) {
+          _debugOpen = !_debugOpen;
+          return;
+        }
+        _toolTab = on ? 0 : id;
+        // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
+        // 用户回去想点画面设焦点会发现点不动。
+        if (_toolTab != 1) _brushMode = 0;
+      }),
+      child: SizedBox(
+        width: 62,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MiuixIcon(
+              vector: appIcon(icon),
+              size: 24,
+              tint: on ? colors.primary : colors.onSurfaceVariantSummary,
+            ),
+            const SizedBox(height: 3),
+            MiuixText(
+              label,
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: on ? colors.primary : colors.onSurfaceVariantSummary,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1544,11 +1788,16 @@ class _PageP24SpatialWallpaperPageState
       if (bd == null) return;
       final String name =
           'toki_spatial_${DateTime.now().millisecondsSinceEpoch}.png';
+      final Uint8List png =
+          bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes);
+      // ★ 同时写进历史（S-40）：这张成片既是历史列表的缩略图，
+      //   也是那条记录「导出」时保存的内容 —— 用户不必回编辑器再渲一次。
+      final String? hid = _historyId;
+      if (hid != null) {
+        unawaited(WallpaperHistoryService.instance.updateShot(hid, png));
+      }
       final String? msg = await PlatFileOpsRegistry.instance
-          .saveImageToGallery(
-            bytes: bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes),
-            fileName: name,
-          );
+          .saveImageToGallery(bytes: png, fileName: name);
       if (mounted) setState(() => _aiInfo = msg ?? '已保存到相册');
     } catch (e) {
       debugPrint('🔴 保存失败: $e');
@@ -1833,6 +2082,126 @@ class _FocusMarker extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// S-40 历史列表的一行：缩略图 + 时间 / 占用 + 导出 / 删除。
+///
+/// 缩略图由每行自己异步读、读完 setState —— 列表可能有 20 条，
+/// 一次性全读进内存没有必要；`cacheWidth` 限制解码宽度，
+/// 避免把整张 4K 原图解码进内存（那正是"缓存一直涨"的老问题）。
+class _HistoryTile extends StatefulWidget {
+  const _HistoryTile({
+    super.key,
+    required this.entry,
+    required this.timeText,
+    required this.sizeText,
+    required this.isCurrent,
+    required this.onOpen,
+    required this.onExport,
+    required this.onDelete,
+  });
+
+  final WallpaperHistoryEntry entry;
+  final String timeText;
+  final String sizeText;
+  final bool isCurrent;
+  final VoidCallback onOpen;
+  final VoidCallback onExport;
+  final VoidCallback onDelete;
+
+  @override
+  State<_HistoryTile> createState() => _HistoryTileState();
+}
+
+class _HistoryTileState extends State<_HistoryTile> {
+  Uint8List? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      WallpaperHistoryService.readFile(widget.entry.previewPath)
+          .then((Uint8List? b) {
+        if (mounted) setState(() => _thumb = b);
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final body1 = MiuixTheme.of(context).textStyles.body1;
+    final body2 = MiuixTheme.of(context).textStyles.body2;
+    final Uint8List? t = _thumb;
+    return Row(
+      children: <Widget>[
+        // 点缩略图 / 文字区 → 载入该条继续编辑
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onOpen,
+            child: Row(
+              children: <Widget>[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: t == null
+                        ? ColoredBox(
+                            color: colors.onSurfaceVariantSummary
+                                .withValues(alpha: 0.18),
+                          )
+                        : Image.memory(t, fit: BoxFit.cover, cacheWidth: 168),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          MiuixText(widget.timeText, style: body1),
+                          if (widget.isCurrent) ...<Widget>[
+                            const SizedBox(width: 6),
+                            MiuixText(
+                              '编辑中',
+                              style: body2,
+                              color: colors.primary,
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      MiuixText(
+                        widget.sizeText,
+                        style: body2,
+                        color: colors.onSurfaceVariantSummary,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        C21CapsuleIconButton(
+          key: ValueKey<String>('wallpaper.history.export.${widget.entry.id}'),
+          icon: appIcon('download'),
+          tooltip: '导出到相册',
+          onTap: widget.onExport,
+        ),
+        C21CapsuleIconButton(
+          key: ValueKey<String>('wallpaper.history.delete.${widget.entry.id}'),
+          icon: appIcon('delete'),
+          tooltip: '删除',
+          onTap: widget.onDelete,
+        ),
+      ],
     );
   }
 }
