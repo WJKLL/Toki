@@ -59,8 +59,8 @@ class SubjectEditMask {
     final double cx = u * width;
     final double cy = v * height;
     final double r = math.max(1.0, radius * math.min(width, height));
-    // 画笔写入"目标层号 + 1"；橡皮写 −1（强制归第 0 层）。
-    final double value = erase ? -1.0 : (brushLayer + 1).toDouble();
+    // 恢复 U-14 的原语义：+1 = 归主体，−1 = 移出主体（回到背景）。
+    final double value = erase ? -1.0 : 1.0;
 
     final int x0 = math.max(0, (cx - r).floor());
     final int x1 = math.min(width - 1, (cx + r).ceil());
