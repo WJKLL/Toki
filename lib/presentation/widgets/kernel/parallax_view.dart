@@ -7,7 +7,16 @@
 //
 // 性能：位移/焦点变化只改 uniform，不重建纹理；纹理由调用方持有并复用。
 // 未就绪或加载失败时降级为直接显示原图（不阻塞页面）。
+//
+// ★ 谁走这条路（P-24 的两条渲染路径，不可互换）
+//   · **无主体**（风景图 / 分割没抓到人）→ 走这里：位移随深度【连续】变化，
+//     没有块间错位，适合深度连续分布的自然风景；
+//   · 有主体（人像）→ 走 LayeredParallaxView：按 mask 切层、层内刚体平移，
+//     近层移开由下层内容兜底，不会露出被抠掉的空洞。
+//   反过来用会出问题：把风景图交给分层，等深线会横穿山脊与树丛，
+//   在画面上切出可见的撕裂线（实测反馈："富士山等等都不太行"）。
 import 'dart:async' show unawaited;
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
@@ -166,17 +175,27 @@ class _ParallaxPainter extends CustomPainter {
     final double hPx = size.height * devicePixelRatio;
     if (wPx <= 0 || hPx <= 0) return;
 
+    // ★ 视野放大倍率：逐像素位移会让画面边缘取到纹理之外，不处理就直接露出
+    //   页面底色。与 LayeredParallaxView 用同一套办法 —— 把采样范围从 [0,1]
+    //   收窄到 [c, 1-c]，等效于给画面补了 margin。
+    //   逐像素模式下位移最大可达 amount（rel 取到 ±1），故按 2×amount 留余量。
+    final double amountPx = amount * devicePixelRatio;
+    final double minSide = math.min(wPx, hPx);
+    final double zoom =
+        minSide <= 1.0 ? 1.0 : 1.0 + 2.0 * amountPx / minSide;
+
     shader
       ..setFloat(0, wPx) // uSize.x
       ..setFloat(1, hPx) // uSize.y
       ..setFloat(2, shift.dx) // uShift.x
       ..setFloat(3, shift.dy) // uShift.y
-      ..setFloat(4, amount * devicePixelRatio) // uAmount（逻辑 px → 物理 px）
+      ..setFloat(4, amountPx) // uAmount（逻辑 px → 物理 px）
       ..setFloat(5, focus) // uFocus
       ..setFloat(6, showDepth ? 1.0 : 0.0) // uShowDepth
       ..setFloat(7, depthGamma) // uDepthGamma
       ..setFloat(8, layers) // uLayers
       ..setFloat(9, focusBand) // uFocusBand
+      ..setFloat(10, zoom) // uZoom（视野放大，替代 margin）
       // 两个 sampler 恒绑定：即使 uShowDepth=1（不用原图）也必须绑原图，
       // 否则 shader 可能被整体判定失效。
       ..setImageSampler(0, image)

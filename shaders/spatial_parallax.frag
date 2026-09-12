@@ -29,6 +29,13 @@
 //   7    uDepthGamma  深度曲线（1=线性；>1 拉开前景差异）
 //   8    uLayers      深度分层数（<=1 = 关闭；>1 = 量化成 N 层）
 //   9    uFocusBand   焦点带宽度（0 = 关闭）
+//   10   uZoom        视野放大倍率（≥1；给位移等效补 margin，防露底）
+//
+// ★ uZoom（本轮新增）—— 风景图走这条路时必须要有
+//   逐像素位移会让画面边缘取到纹理之外，不处理就露出页面底色。与
+//   layer_compose.frag 用同一套办法：把采样范围从 [0,1] 收紧到 [c, 1-c]。
+//   ⚠️ 必须是【除以】uZoom：写成乘法会把采样范围扩到 [0,1] 之外，越界被
+//      clamp 拉边 → 四周出现一圈拉伸糊边（这个方向极易写反）。
 //
 // ⚠️ sampler 必须【恒绑定】两个（即使不用深度可视化也要绑），
 //    否则 Skia/Impeller 可能整体判定 shader 失效。
@@ -44,6 +51,7 @@ uniform float uShowDepth;
 uniform float uDepthGamma;
 uniform float uLayers;
 uniform float uFocusBand;
+uniform float uZoom;
 
 uniform sampler2D uTexture;  // 原图（RGBA）
 uniform sampler2D uDepth;    // 深度图（灰度，已归一化到 0..1）
@@ -53,8 +61,11 @@ out vec4 fragColor;
 void main() {
     vec2 uv = FlutterFragCoord().xy / uSize;
 
+    // 视野放大：采样范围【收窄】到 [c, 1-c]，给逐像素位移等效补上 margin。
+    vec2 uvz = (uv - 0.5) / uZoom + 0.5;
+
     // 深度：0 = 最远，1 = 最近（预设模板与 AI 深度图统一约定）
-    float d = clamp(texture(uDepth, uv).r, 0.0, 1.0);
+    float d = clamp(texture(uDepth, uvz).r, 0.0, 1.0);
     d = pow(d, uDepthGamma);
 
     // 深度分层（仅几何模板需要；AI 深度图应关闭）
@@ -72,7 +83,7 @@ void main() {
     }
 
     // 反向位移：比焦点近的向 +shift 移，比焦点远的向 -shift 移
-    vec2 sampleUv = uv + (uShift * rel * uAmount * w) / uSize;
+    vec2 sampleUv = uvz + (uShift * rel * uAmount * w) / uSize;
     sampleUv = clamp(sampleUv, vec2(0.0), vec2(1.0));
 
     if (uShowDepth > 0.5) {

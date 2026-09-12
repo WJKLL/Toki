@@ -225,6 +225,22 @@ class _PageP24SpatialWallpaperPageState
   ///   ⚠️ 别把"物理正确值"当目标 —— 那只有亚像素，观感上等于没有立体感。
   ///      这里取的是"略大于物理、但远低于可见形变阈值"的折中。
   static const double _relief = 1.5;
+
+  /// 判"这张图有主体"的前景覆盖率下限；低于它按【风景/无主体】处理。
+  ///
+  /// ★ 为什么风景图不能走分层（本轮修复）
+  ///   分层是把画面按【等深线】切成几块、块内做刚体平移。这对人像有效 ——
+  ///   主体轮廓与等深线大致重合；但**风景图的深度是连续分布**，等深线是一条
+  ///   不规则的曲线，会横穿山脊、树丛。切出来的两块边缘刚性错位，观感就是
+  ///   "整幅画面被撕成两块"。
+  ///   `shaders/spatial_parallax.frag` 的文件头其实早就写明这一点：
+  ///     "真实深度图的等深线是不规则曲线，全局按深度值切层会切出可见的分割线。"
+  ///
+  ///   风景图改用【逐像素视差】：位移随深度连续变化、没有块间错位，
+  ///   观感是整幅画面在空间里平滑滑动 —— 这正是它需要的。
+  ///   实测反馈："深度图识别似乎准确，但富士山等等都不太行" ——
+  ///   **深度没问题，是渲染策略用错了**。
+  static const double _subjectCoverageMin = 0.05;
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -386,7 +402,11 @@ class _PageP24SpatialWallpaperPageState
       final SubjectMask? mask = await _runSegmentation(bytes);
       // ★ 切成图层 —— "分层 + 图层平移"渲染的数据基础
       final ui.Image? photoImg = _photo;
-      final DepthLayerSet? set = photoImg == null
+      // ★ 无主体（风景图 / 分割没抓到人）→ **不切层**，交给逐像素视差渲染。
+      //   原因见 _subjectCoverageMin 的说明：连续深度被等深线切块会撕裂。
+      final bool hasSubject =
+          mask != null && mask.coverage >= _subjectCoverageMin;
+      final DepthLayerSet? set = (photoImg == null || !hasSubject)
           ? null
           : await DepthLayerSplitter.split(
               photo: photoImg,
@@ -885,7 +905,13 @@ class _PageP24SpatialWallpaperPageState
                                   depth: depth,
                                   shift: shift,
                                   amount: motionAmount,
-                                  focus: _focus,
+                                  // ★ 无主体（AI 深度且未切层）时把焦点钉在【最近处】：
+                                  //   此时 rel = d − 1 ≤ 0，所有像素【同向】位移、
+                                  //   近处小远处大 —— 即"同向递减"，与分层模式的
+                                  //   观感一致。若沿用默认的 0.5，画面会一半向
+                                  //   +shift、一半向 −shift，看起来像从中间被撕开。
+                                  //   几何模板模式（_aiDepth=false）仍由用户控制焦点。
+                                  focus: (_aiDepth && set == null) ? 1.0 : _focus,
                                   showDepth: _showDepth,
                                   depthGamma: _gamma,
                                   layers: _layers,
