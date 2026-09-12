@@ -18,13 +18,24 @@
 //   倾角随晃动轻微变化 → 产生"贴在空间里"的侧向透视感（参考鸿蒙 7 空间壁纸），
 //   而位置保持不变，同时满足"时钟没动"与"像贴上去"。
 
+import 'dart:typed_data';
+
+import 'spatial_style.dart';
+
 /// 空间组件类型。
 ///
 /// 扩展点：新增类型时在此加值，并在渲染侧补上对应 builder
 /// （期 7 起改为注册表，见 PLAN_components_v1.53.md §8.2）。
 enum SpatialComponentKind {
-  /// 数字时钟（期 1 唯一实现的类型）。
+  /// 数字时钟。
   clock,
+
+  /// ★ 艺术字：自由文本 + 完整样式（S-42）。内容在 props['text']。
+  text,
+
+  /// ★ 图案：Logo / 贴纸 / 表情 / 图标。
+  /// 图片字节在 props['bytes']（Uint8List），列表展示用 props['imgName']。
+  image,
 }
 
 /// 一个空间组件（不可变）。
@@ -50,6 +61,7 @@ class SpatialComponent {
     this.corner = 26.0,
     this.glass = 0.55,
     this.tiltFollow = 1.0,
+    this.style = SpatialStylePresets.minimal,
     this.props = const <String, Object?>{},
   });
 
@@ -111,6 +123,14 @@ class SpatialComponent {
   /// 自身倾斜跟随晃动方向的倍率（0 = 不跟随，完全静态平面）。
   final double tiltFollow;
 
+  /// ★ 样式（S-42）：**所有组件共用**的一套外观参数。
+  ///
+  /// 文字类用它（字体 / 描边 / 渐变 / 发光 / 胶囊底）；
+  /// 图案类用它的阴影与不透明度（着色、裁切在 props 里）。
+  /// 把它放在组件上而不是各 kind 自己一套，是"样式层"的全部意义 ——
+  /// 加一个样式维度，所有组件自动获得。
+  final SpatialStyle style;
+
   /// 类型专属参数（schema 驱动，见 PLAN_components_v1.53.md §8.1）。
   ///
   /// clock 用：`h24`(bool) / `showDate`(bool) / `showSeconds`(bool)。
@@ -140,6 +160,7 @@ class SpatialComponent {
     double? corner,
     double? glass,
     double? tiltFollow,
+    SpatialStyle? style,
     Map<String, Object?>? props,
   }) {
     return SpatialComponent(
@@ -160,6 +181,7 @@ class SpatialComponent {
       corner: corner ?? this.corner,
       glass: glass ?? this.glass,
       tiltFollow: tiltFollow ?? this.tiltFollow,
+      style: style ?? this.style,
       props: props ?? this.props,
     );
   }
@@ -252,6 +274,64 @@ class SpatialComponent {
         'h24': true,
         'showDate': true,
         'showSeconds': false,
+      },
+    );
+  }
+
+  /// 新建一个**艺术字**组件。
+  ///
+  /// 内容放 props['text']（沿用既有 schema，不必再开字段）；
+  /// 外观全部交给 [style]，于是"样式层加一个维度、所有文字类组件自动获得"。
+  static SpatialComponent text({
+    String content = '你好',
+    double u = 0.5,
+    double v = 0.5,
+    double scale = 1.0,
+    SpatialStyle style = SpatialStylePresets.minimal,
+  }) {
+    return SpatialComponent(
+      id: _newId(),
+      kind: SpatialComponentKind.text,
+      // 列表里显示一小段即可，别把整段文字塞进 label。
+      // 直接从码点截断，不引 characters 包。
+      label: content.runes.length > 6
+          ? '${String.fromCharCodes(content.runes.take(6))}…'
+          : content,
+      u: u,
+      v: v,
+      scale: scale,
+      style: style,
+      props: <String, Object?>{'text': content},
+    );
+  }
+
+  /// 新建一个**图案**组件（Logo / 贴纸 / 表情）。
+  ///
+  /// [shape]：0 = 原样，1 = 圆形，2 = 圆角（配合 props['rounded']）。
+  static SpatialComponent sticker({
+    required Uint8List bytes,
+    required String name,
+    double u = 0.5,
+    double v = 0.5,
+    double scale = 1.0,
+    SpatialStyle style = SpatialStylePresets.minimal,
+    double size = 120,
+    int shape = 0,
+  }) {
+    return SpatialComponent(
+      id: _newId(),
+      kind: SpatialComponentKind.image,
+      label: name,
+      u: u,
+      v: v,
+      scale: scale,
+      style: style,
+      props: <String, Object?>{
+        'bytes': bytes,
+        'imgName': name,
+        'size': size,
+        'shape': shape,
+        'rounded': 16.0,
       },
     );
   }

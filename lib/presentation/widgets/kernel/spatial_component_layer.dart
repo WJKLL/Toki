@@ -15,10 +15,14 @@
 // ★ 期 1 的"外壳"是简易半透明玻璃（纯 Flutter 绘制）。
 //   期 2 换成 LensRefraction（折射 + 色散 + 厚度感）时，只需替换 [_shell]，
 //   本文件的定位 / 3D / 视差 / 手势逻辑全部零改动。
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import '../../../domain/entities/spatial_component.dart';
 import 'component_clock.dart';
+import 'spatial_styled_image.dart';
+import 'spatial_styled_text.dart';
 
 /// 组件被拖动时回调（归一化增量，0..1 相对画面）。
 typedef ComponentMoveCallback =
@@ -134,6 +138,38 @@ class SpatialComponentLayer extends StatelessWidget {
           h24: c.boolProp('h24', or: true),
           showDate: c.boolProp('showDate', or: true),
           showSeconds: c.boolProp('showSeconds'),
+        );
+
+      // ★ 艺术字：走 C-68 样式化文字渲染器 —— 发光/描边/渐变/胶囊底/竖排
+      //   全部由 S-42 的 style 驱动，这里只负责把内容取出来。
+      case SpatialComponentKind.text:
+        final Object? t = c.props['text'];
+        return SpatialStyledText(
+          text: t is String ? t : '',
+          style: c.style,
+          vertical: c.boolProp('vertical'),
+          textAlign: TextAlign.center,
+        );
+
+      // ★ 图案（Logo / 贴纸 / 表情）：走 C-69。
+      case SpatialComponentKind.image:
+        final Object? b = c.props['bytes'];
+        if (b is! Uint8List || b.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final Object? sz = c.props['size'];
+        final int shapeRaw =
+            c.props['shape'] is int ? c.props['shape']! as int : 0;
+        final Object? rd = c.props['rounded'];
+        return SpatialStyledImage(
+          image: MemoryImage(b),
+          size: sz is num ? sz.toDouble() : 120,
+          circle: shapeRaw == 1,
+          rounded: shapeRaw == 2 && rd is num ? rd.toDouble() : 0,
+          shadowBlur: c.style.shadowBlur,
+          shadowDy: c.style.shadowDy,
+          shadowColor: c.style.shadowColor,
+          opacity: c.style.opacity,
         );
     }
   }
