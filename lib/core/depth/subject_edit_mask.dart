@@ -123,9 +123,15 @@ class SubjectEditMask {
         final int ex = (x * width ~/ w).clamp(0, width - 1);
         final double e = data[erow + ex];
         if (e == 0) continue;
-        // 擦除 → 第 0 层；涂刷 → 用户选的那一层
-        final int k =
-            e < 0 ? 0 : (e.round() - 1).clamp(0, centers.length - 1);
+        // ★ 擦除（e < 0）= **撤销指定、恢复 AI 的原始深度**，
+        //   而不是"强制归第 0 层"。
+        //   强制归第 0 层会让擦过的地方以【最远层】的速度移动，而周围背景
+        //   很可能本来就在中层 —— 结果那块看着像【自己新分了一层】，
+        //   而不是融回原来的背景。
+        //   （用户反馈："涂抹后是作为新的分层而不是融回一开始的背景"）
+        //   真正想"指定它跟最远层走"，用画笔选第 1 层即可。
+        if (e < 0) continue;
+        final int k = (e.round() - 1).clamp(0, centers.length - 1);
         depth[row + x] = centers[k];
       }
     }
