@@ -251,3 +251,43 @@ CameraPreset { 名字 · 时长 · 是否循环 · shift(t) → Offset }
 例如"推进"时让**焦点深度也随时间缓慢前移** ⇒ 前后景的移动比例随时间变化，
 观感比固定视差强一个档次。实现上只是**把 `_focus` 也做成时间的函数**，工作量很小。
 
+---
+
+## 八、玻璃 / 折射作用在【字与图案本身】（期 2）
+
+### 8.1 目标
+
+不是给组件垫一个玻璃方块，而是**让数字、字、Logo 自己变成玻璃**：
+背后的画面透过笔画发生**模糊与折射**，像真的玻璃字。
+
+### 8.2 技术路径（不需要新造轮子）
+
+```
+ShaderMask(                 // ① 用【字形】当遮罩（srcIn 只保留文字形状）
+  blendMode: BlendMode.srcIn,
+  shaderCallback: (b) => 把文字渲染成 shader,
+  child: BackdropFilter(    // ② 采样它【背后】的画面
+    filter: ImageFilter.shader(折射 shader),   // ③ 复用已有的 lens_refraction.frag
+    child: SizedBox.expand(),
+  ),
+)
+```
+
+- `BackdropFilter` 采样的是**已经画在它下面的东西** ⇒ 天然就是"透过字看见背景"
+- `ImageFilter.shader(FragmentShader)` 让我们能塞**自定义折射**，而不只是模糊
+- 折射 shader 我们**已经有了**（`lens_refraction.frag`，光感水印模块在用）⇒ 直接复用
+
+### 8.3 三个必须处理的点
+
+| # | 问题 | 对策 |
+|:---|:---|:---|
+| 1 | **性能** | BackdropFilter 会强制图层分离、且读回后台缓冲。**只在组件区域生效**（不是全屏），并且**只在真的开了玻璃时才挂**（`glass > 0` 才 build 这一层） |
+| 2 | **导出一致性** | 离屏 `toImage` 路径下 BackdropFilter 行为需实测；若不一致，导出时降级为"预烘焙的折射贴图" |
+| 3 | **与外壳的关系** | 这是**两条不同的路**：<br>· `glass` 滑条 = 给组件垫玻璃底（卡片感）<br>· **本方案 = 让内容自己成为玻璃**<br>UI 上要分开命名，别让用户以为是同一个东西 |
+
+### 8.4 落地顺序
+
+先做**模糊版**（`ImageFilter.blur`，稳），确认导出一致后再换**折射版**
+（`ImageFilter.shader` + `lens_refraction.frag`）—— 分两步走，出问题好定位。
+
+

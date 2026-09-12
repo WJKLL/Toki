@@ -367,6 +367,13 @@ class _PageP24SpatialWallpaperPageState
   /// "我到底改了什么"，这是编辑类工具的刚需。
   bool _showOriginal = false;
 
+  /// 艺术字内容编辑框的控制器。
+  ///
+  /// ★ 必须有控制器：不加控制器的话每敲一个字都会 setState → 输入框被重建 →
+  ///   文字被清空，表现为"只能打出一个字"。这是输入框的经典坑。
+  ///   选中不同组件时把文本同步过来（见 _buildComponentControls）。
+  final TextEditingController _textCtrl = TextEditingController();
+
   /// 双指缩放开始时的倍率（捏合的基准），以及单指笔迹是否已起笔。
   double _pinchBase = 1.0;
   bool _strokeStarted = false;
@@ -449,6 +456,7 @@ class _PageP24SpatialWallpaperPageState
     // 统一释放。以前这里只 dispose 了这 4 个 ui.Image，而深度结果 / 主体 mask /
     // 撤销栈会一直挂到进程结束 —— 那也是"越编辑越占内存"的一部分。
     _releaseEditorResources();
+    _textCtrl.dispose();
     super.dispose();
   }
 
@@ -2478,8 +2486,18 @@ class _PageP24SpatialWallpaperPageState
   }
 
   /// 选中组件的参数（S-38）。未选中时给出操作提示。
-  List<Widget> _buildComponentControls(MiuixColors colors, bool hasImage) {
-    if (!hasImage) return const <Widget>[];
+  /// 把选中组件的文字同步进编辑框。
+  ///
+  /// 只在真的不同时才赋值 —— 每次 setState 都赋值会让光标跳到末尾，
+  /// 打字打到一半光标乱飞。
+  TextEditingController _syncTextController(SpatialComponent c) {
+    final Object? t = c.props['text'];
+    final String want = t is String ? t : '';
+    if (_textCtrl.text != want) _textCtrl.text = want;
+    return _textCtrl;
+  }
+
+  List<Widget> _buildComponentControls(MiuixColors colors, bool hasImage) {    if (!hasImage) return const <Widget>[];
     final SpatialComponent? c = _selected;
     if (c == null) {
       return <Widget>[
@@ -2499,6 +2517,107 @@ class _PageP24SpatialWallpaperPageState
         style: MiuixTheme.of(context).textStyles.body2,
         color: colors.onSurfaceVariantSummary,
       ),
+      // ── ★ 艺术字：内容 + 样式预设（期 1 的核心：自定义程度）──
+      if (c.kind == SpatialComponentKind.text) ...<Widget>[
+        MiuixText(
+          '文字内容',
+          style: MiuixTheme.of(context).textStyles.body2,
+          color: colors.onSurfaceVariantSummary,
+        ),
+        const SizedBox(height: 4),
+        MiuixTextField(
+          key: ValueKey<String>('wallpaper.text.${c.id}'),
+          controller: _syncTextController(c),
+          label: '输入文字',
+          useLabelAsPlaceholder: true,
+          singleLine: true,
+          insideMargin: _itemMargin,
+          onChanged: (String v) => _updateSelected(
+            (SpatialComponent x) => x.copyWith(
+              props: <String, Object?>{...x.props, 'text': v},
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        MiuixText(
+          '样式预设',
+          style: MiuixTheme.of(context).textStyles.body2,
+          color: colors.onSurfaceVariantSummary,
+        ),
+        const SizedBox(height: 4),
+        // 5 套预设：排一行，点一下整套换掉。预设是"已经调好的审美起点"，
+        // 比开放全部参数更容易出好看的结果。
+        Row(
+          children: <Widget>[
+            for (int i = 0; i < SpatialStylePresets.all.length; i++) ...<Widget>[
+              Expanded(
+                child: _MiButton(
+                  key: ValueKey<String>('wallpaper.style.$i'),
+                  onPressed: () => _updateSelected(
+                    (SpatialComponent x) => x.copyWith(
+                      style: SpatialStylePresets.all[i].$2,
+                    ),
+                  ),
+                  child: Text(
+                    SpatialStylePresets.all[i].$1,
+                    maxLines: 1,
+                  ),
+                ),
+              ),
+              if (i != SpatialStylePresets.all.length - 1)
+                const SizedBox(width: 4),
+            ],
+          ],
+        ),
+        const SizedBox(height: 6),
+        _MiSlider(
+          title: '字号',
+          summary: c.style.fontSize.round().toString(),
+          value: c.style.fontSize,
+          min: 10,
+          max: 90,
+          onValueChange: (double v) => _updateSelected(
+            (SpatialComponent x) => x.copyWith(style: x.style.copyWith(fontSize: v)),
+          ),
+        ),
+        _MiSlider(
+          title: '描边宽度',
+          summary: c.style.strokeWidth <= 0.01
+              ? '关闭'
+              : c.style.strokeWidth.toStringAsFixed(1),
+          value: c.style.strokeWidth,
+          min: 0,
+          max: 10,
+          onValueChange: (double v) => _updateSelected(
+            (SpatialComponent x) =>
+                x.copyWith(style: x.style.copyWith(strokeWidth: v)),
+          ),
+        ),
+        _MiSlider(
+          title: '外发光',
+          summary: c.style.glowRadius <= 0.01
+              ? '关闭'
+              : c.style.glowRadius.toStringAsFixed(0),
+          value: c.style.glowRadius,
+          min: 0,
+          max: 40,
+          onValueChange: (double v) => _updateSelected(
+            (SpatialComponent x) =>
+                x.copyWith(style: x.style.copyWith(glowRadius: v)),
+          ),
+        ),
+        // ★ 竖排：逐字换行（不是旋转整块）
+        _MiSwitch(
+          title: '竖排',
+          summary: '中文题字用，标点保持正立',
+          value: c.boolProp('vertical'),
+          onChanged: (bool v) => _updateSelected(
+            (SpatialComponent x) => x.copyWith(
+              props: <String, Object?>{...x.props, 'vertical': v},
+            ),
+          ),
+        ),
+      ],
       // ★ Z 与视差【解耦】：Z 决定前后关系（期 6 起同时决定遮挡），
       //   视差系数决定动不动。默认 Z 最前 + 视差 0 = 盖在最上层但完全固定。
       _MiSlider(
