@@ -6,14 +6,35 @@
 //   鸿蒙侧需另写实现（@ohos/onnxruntime + MethodChannel 插件），
 //   经 DepthInferenceRegistry.register() 注入，本文件不进镜像。
 //
-// 模型（实测规格，见 PLAN_wallpaper_v1.52.md §6.6）：
-//   输入  ['batch', 3, 'height', 'width']  float32，归一化到 [0,1]
-//   输出  ['batch', 1, 'height', 'width']  float32，**米制绝对深度**
-//   已验证输入边长 384 / 512 / 640 / 768 全部可跑（dynamic shape 导出）
+// ★★ 模型已从 YOLO26-n depth 换成 Depth Anything V2 Small（int8）
 //
-// 预处理必须与训练严格一致：letterbox（保持宽高比 + 114 灰填充）→ /255 → NCHW。
-// 这里刻意用 Skia 的 drawImageRect 做 letterbox，而不是手写双线性 ——
-// 让 GPU 做缩放，质量更好且更快。
+//   为什么换（离线实测，脚本 D:\Projects\mode\yolo_work\diagD_dav2_vs_yolo.py）：
+//     自然风景是 YOLO26-n 的短板。实测那张"富士山 + 樱花"：
+//       画面【下方】的近景樱花树丛被判成【最远】，富士山与天空同层；
+//       上下半均值差 = −0.120（方向反了）。
+//     同一张图 DAV2 给出 +0.010（方向正确），且下方樱花是明确的近景。
+//     8 张测试图上 DAV2 全部通过"下方比上方近"的常识性校验。
+//   连带收益：DAV2 的深度边界比 YOLO26 清晰得多 —— 真人那张照片里两个人戴的
+//     【纸箱头】在深度图上轮廓分明（而 modnet 分割完全不认识纸箱，导致头身
+//     撕裂、只能手动涂刷补救）。这为将来"用深度补全 mask"留了路。
+//
+//   为什么用 int8 而不是 fp16（脚本 diagE_dav2_int8.py 实测）：
+//     体积 99.1 MB → 27.1 MB；与 fp32 的相关系数 0.9960、Otsu 切点偏移均值
+//     0.0078、6 张图的上下半方向全部一致 —— 精度几乎无损。
+//     ⚠️ 与分割模型相反：本项目历史上有"深度模型 int8 会崩"的记录
+//     （见 quant_seg.py 注释），所以 DAV2 的 int8 是【实测过】才敢用的。
+//
+// ★ DAV2 的输入/输出规格与 YOLO26 **完全不同**，照抄旧代码会静默出错：
+//   输入  pixel_values     float32  [batch, 3, height, width]，**ImageNet 归一化**
+//         尺寸必须是 14 的倍数（ViT patch = 14）
+//   输出  predicted_depth  float32  [batch, H', W']  —— **三维**，不是四维
+//         H' = 14*floor(height/14)、W' = 14*floor(width/14)
+//   语义  输出是【相对视差】，越大越近 —— 与 shader 要的
+//         "0 = 最远 / 1 = 最近"天然一致，**不需要 1/v 换算**（米制才需要）
+//
+//   预处理（对齐 DAV2 官方 get_resize + Resize(keep_aspect_ratio=True)）：
+//     保持长宽比、使【总面积】对齐 size²，再把边长取整到 14 的倍数，
+//     **不补边、不做 letterbox**。缩放仍交给 Skia 的 drawImageRect（GPU、质量好）。
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -28,16 +49,19 @@ import 'depth_inference.dart';
 class OnnxDepthInference implements DepthInference {
   OnnxDepthInference({this.assetKey = defaultAssetKey});
 
-  /// 打包进 App 的模型（FP16 dynamic，约 10 MB）。
-  static const String defaultAssetKey =
-      'assets/models/yolo26n-depth_fp16.onnx';
+  /// 打包进 App 的模型：Depth Anything V2 Small（int8 动态量化，约 26 MB）。
+  static const String defaultAssetKey = 'assets/models/dav2-small_int8.onnx';
+
+  /// ViT patch 尺寸 —— 输入边长必须是它的整数倍，否则模型内部的
+  /// `14*floor(h/14)` 会把我们喂进去的尺寸悄悄改掉，输出与预期对不上。
+  static const int dav2Patch = 14;
 
   final String assetKey;
 
   static final OnnxDepthInference instance = OnnxDepthInference();
 
   OrtSession? _session;
-  String _inputName = 'images';
+  String _inputName = 'pixel_values';
   Future<OrtSession?>? _loading;
   bool _failed = false;
 
@@ -55,7 +79,8 @@ class OnnxDepthInference implements DepthInference {
     try {
       final OrtSession s =
           await OnnxRuntime().createSessionFromAsset(assetKey);
-      _inputName = s.inputNames.isNotEmpty ? s.inputNames.first : 'images';
+      _inputName =
+          s.inputNames.isNotEmpty ? s.inputNames.first : 'pixel_values';
       _session = s;
       debugPrint('🟢 S-31 深度模型就绪: $assetKey '
           '(input=$_inputName outputs=${s.outputNames})');
@@ -70,7 +95,7 @@ class OnnxDepthInference implements DepthInference {
   @override
   Future<DepthResult?> infer(
     Uint8List imageBytes, {
-    int inputSize = 640,
+    int inputSize = 518,
   }) async {
     final OrtSession? session = await _ensureSession();
     if (session == null) return null;
@@ -78,26 +103,23 @@ class OnnxDepthInference implements DepthInference {
     OrtValue? input;
     Map<String, OrtValue>? outputs;
     try {
-      final (ui.Image letterboxed, int vx, int vy, int vw, int vh) =
-          await _letterbox(imageBytes, inputSize);
+      final (ui.Image resized, int nw, int nh) =
+          await _resizeDav2(imageBytes, inputSize);
       final ByteData? bd =
-          await letterboxed.toByteData(format: ui.ImageByteFormat.rawRgba);
-      letterboxed.dispose();
+          await resized.toByteData(format: ui.ImageByteFormat.rawRgba);
+      resized.dispose();
       if (bd == null) return null;
 
       final Uint8List rgba =
           bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes);
-      final Float32List nchw = _toNchw(rgba, inputSize);
+      final Float32List nchw = _toNchwImagenet(rgba, nw, nh);
 
-      input = await OrtValue.fromList(
-        nchw,
-        <int>[1, 3, inputSize, inputSize],
-      );
+      input = await OrtValue.fromList(nchw, <int>[1, 3, nh, nw]);
       outputs = await session.run(<String, OrtValue>{_inputName: input});
 
       final OrtValue out = outputs.values.first;
       final List<dynamic> raw = await out.asFlattenedList();
-      return _normalize(raw, inputSize, inputSize, vx, vy, vw, vh);
+      return _normalizeDisp(raw, nw, nh);
     } catch (e) {
       debugPrint('🔴 S-31 推理失败: $e');
       return null;
@@ -111,16 +133,16 @@ class OnnxDepthInference implements DepthInference {
     }
   }
 
-  /// letterbox：保持宽高比缩放到 size×size，四周补 114 灰。
-  /// 与 ultralytics 的 LetterBox 默认行为一致。
+  /// DAV2 预处理：保持长宽比 → 总面积对齐 [size]² → 边长取整到 14 的倍数。
   ///
-  /// 返回 (图, 有效区 x / y / w / h) —— **有效区必须传出去**：手机竖图的
-  /// padding 面积可达 40%~45%，若把 pad 也纳入归一化的分位数统计，
-  /// 真实内容的深度会被压进极窄区间（详见 _normalize 注释）。
-  Future<(ui.Image, int, int, int, int)> _letterbox(
-    Uint8List bytes,
-    int size,
-  ) async {
+  /// ★ 不补边、不做 letterbox。
+  ///   DAV2 官方就是不补边的直接 resize；若照抄 YOLO26 那套"补 114 灰的
+  ///   letterbox"，灰边会被当成真实像素送进 ViT，整圈边缘的深度都会失真
+  ///   （而且不会报错，只会安静地给出错的深度图）。
+  ///
+  /// 返回 (图, 宽, 高) —— 宽高都已是 14 的倍数，因此模型的
+  /// `14*floor(x/14)` 不会再改动它们。
+  Future<(ui.Image, int, int)> _resizeDav2(Uint8List bytes, int size) async {
     final ui.Codec codec = await ui.instantiateImageCodec(bytes);
     final ui.FrameInfo frame = await codec.getNextFrame();
     final ui.Image src = frame.image;
@@ -130,33 +152,31 @@ class OnnxDepthInference implements DepthInference {
       if (w <= 0 || h <= 0) {
         throw StateError('图片尺寸非法: ${w}x$h');
       }
-      final double r = math.min(size / w, size / h);
-      final int nw = math.max(1, (w * r).round());
-      final int nh = math.max(1, (h * r).round());
-      final int left = (size - nw) ~/ 2;
-      final int top = (size - nh) ~/ 2;
+
+      // 保持长宽比、让【面积】等于 size²（DAV2 官方 keep_aspect_ratio 的做法）。
+      final double scale = math.sqrt((size * size) / (w * h));
+      final int nw = math.max(
+        dav2Patch,
+        (w * scale / dav2Patch).round() * dav2Patch,
+      );
+      final int nh = math.max(
+        dav2Patch,
+        (h * scale / dav2Patch).round() * dav2Patch,
+      );
 
       final ui.PictureRecorder recorder = ui.PictureRecorder();
       final Canvas canvas = Canvas(recorder);
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble()),
-        Paint()..color = const Color(0xFF727272), // 114 灰
-      );
       canvas.drawImageRect(
         src,
         Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-        Rect.fromLTWH(
-          left.toDouble(),
-          top.toDouble(),
-          nw.toDouble(),
-          nh.toDouble(),
-        ),
-        Paint()..filterQuality = FilterQuality.medium,
+        Rect.fromLTWH(0, 0, nw.toDouble(), nh.toDouble()),
+        // high（双三次）：DAV2 官方用 bicubic 上采样，这里与之对齐。
+        Paint()..filterQuality = FilterQuality.high,
       );
       final ui.Picture picture = recorder.endRecording();
       try {
-        final ui.Image out = await picture.toImage(size, size);
-        return (out, left, top, nw, nh);
+        final ui.Image out = await picture.toImage(nw, nh);
+        return (out, nw, nh);
       } finally {
         picture.dispose();
       }
@@ -166,59 +186,46 @@ class OnnxDepthInference implements DepthInference {
     }
   }
 
-  /// RGBA8888 → NCHW float32，除以 255 归一化到 [0,1]。
-  static Float32List _toNchw(Uint8List rgba, int size) {
-    final int area = size * size;
+  /// RGBA8888 → NCHW float32，按 **ImageNet** 均值/标准差归一化。
+  ///
+  /// ★ 与 YOLO26 的区别：那个只做 `/255`，不做减均值除方差。
+  ///   顺序或参数写错不会报错，只会安静地给出一张近乎全平的深度图。
+  static Float32List _toNchwImagenet(Uint8List rgba, int w, int h) {
+    const List<double> mean = <double>[0.485, 0.456, 0.406];
+    const List<double> std = <double>[0.229, 0.224, 0.225];
+    final int area = w * h;
     final Float32List out = Float32List(3 * area);
-    const double inv = 1.0 / 255.0;
     for (int i = 0; i < area; i++) {
       final int p = i * 4;
-      out[i] = rgba[p] * inv;
-      out[area + i] = rgba[p + 1] * inv;
-      out[2 * area + i] = rgba[p + 2] * inv;
+      for (int ch = 0; ch < 3; ch++) {
+        out[ch * area + i] = (rgba[p + ch] / 255.0 - mean[ch]) / std[ch];
+      }
     }
     return out;
   }
 
-  /// 米制深度 → [0,1] 归一化。
+  /// DAV2 的相对视差 → [0,1] 归一化（**0 = 最远，1 = 最近**）。
   ///
-  /// 用**百分位裁剪**（2% ~ 98%）而不是固定范围：不同照片的绝对深度跨度差异很大
-  /// （实测 small 版理论值域可达 0.1~825 m），固定范围会让大多数图挤在很窄的
-  /// 一段里、失去层次。采样 4096 个点估分位，避免对 40 万像素排序。
-  static DepthResult? _normalize(
-    List<dynamic> raw,
-    int w,
-    int h,
-    int vx,
-    int vy,
-    int vw,
-    int vh,
-  ) {
+  /// ★ 与旧实现的根本区别：**不再做 `1/米` 的换算**。
+  ///   YOLO26 输出的是米制绝对深度（越大越远），必须取倒数才能对上 shader 的
+  ///   方向；DAV2 输出的本来就是视差（越大越近），再取一次倒数会把方向弄反
+  ///   —— 那正是"人物和背景的远近整个颠倒"的成因。
+  ///
+  /// 用百分位裁剪（2% ~ 98%）而不是 min/max：单点极值会把整幅图压平
+  /// （历史上踩过"主体与背景区分不清"）。每 1/64 采样估分位，
+  /// 避免对几十万像素排序。
+  static DepthResult? _normalizeDisp(List<dynamic> raw, int w, int h) {
     final int n = w * h;
     if (raw.length < n) return null;
 
-    // ★ 只用 letterbox **有效区域内**的像素统计分位数。
-    //   padding 区域的深度值是模型对 114 灰填充的预测，毫无意义；而手机竖图
-    //   的 padding 面积可达 40%~45%，一旦参与统计就会把 2%/98% 分位数整个带偏，
-    //   把真实内容的深度压进极窄区间 —— 表现为"主体与背景区分不清"。
-    //
-    // ★★ 统计与归一化都改到【视差域】(1/米) 做，而不是线性深度域。
-    //
-    //   线性深度的问题：近距离的动态范围被严重压缩。实测一张真人照
-    //   （yolo26n-depth_fp32，640×480）：
-    //     躯干带 1.54~1.95 m、顶部背景 6.15~8.68 m，线性 span = 7.47 m
-    //     → 躯干内部只占归一化区间的一点点，人物与近处地面几乎同色；
-    //   换成视差后，同一区域的归一化动态范围从 0.284 提到 0.616（2.2 倍）。
-    //   物理上也更合理：视差 (1/深度) 就是"像素位移量"，与视觉远近感直接对应，
-    //   也是单目深度模型的惯用输出表示。
-    final int stepX = math.max(1, vw ~/ 64);
-    final int stepY = math.max(1, vh ~/ 64);
+    final int stepX = math.max(1, w ~/ 64);
+    final int stepY = math.max(1, h ~/ 64);
     final List<double> samples = <double>[];
-    for (int y = vy; y < vy + vh; y += stepY) {
+    for (int y = 0; y < h; y += stepY) {
       final int rowBase = y * w;
-      for (int x = vx; x < vx + vw; x += stepX) {
+      for (int x = 0; x < w; x += stepX) {
         final double v = (raw[rowBase + x] as num).toDouble();
-        if (v.isFinite && v > 1e-6) samples.add(1.0 / v);
+        if (v.isFinite) samples.add(v);
       }
     }
     if (samples.isEmpty) return null;
@@ -235,30 +242,21 @@ class OnnxDepthInference implements DepthInference {
         )];
     final double span = math.max(hi - lo, 1e-9);
 
-    // ★ 只输出【有效区域】：深度图必须与原图**同宽高比**。否则 shader 用同一套
-    //   uv 采样 uTexture（原图，1440×2626）与 uDepth（含 pad 的 640×640 方图）
-    //   会**整体错位**：深度图里人物的位置其实对应到了原图的其他位置 —— 实测
-    //   表现正是"人物背后的背景无法与人物区分"。
-    //
-    // ★ 不再需要翻转深度方向：视差越大 = 越近，天然就是 shader 要的
-    //   0 = 最远 / 1 = 最近（线性深度域才需要一次 1.0−n 的翻转）。
-    final Float32List out = Float32List(vw * vh);
-    for (int y = 0; y < vh; y++) {
-      final int srcBase = (vy + y) * w + vx;
-      final int dstBase = y * vw;
-      for (int x = 0; x < vw; x++) {
-        final double v = (raw[srcBase + x] as num).toDouble();
-        final double disp = (v.isFinite && v > 1e-6) ? 1.0 / v : 0.0;
-        out[dstBase + x] = ((disp - lo) / span).clamp(0.0, 1.0);
-      }
+    final Float32List out = Float32List(n);
+    for (int i = 0; i < n; i++) {
+      final double v = (raw[i] as num).toDouble();
+      out[i] = v.isFinite ? ((v - lo) / span).clamp(0.0, 1.0) : 0.0;
     }
+    // 深度图尺寸 = DAV2 的输入尺寸，与原图**同宽高比**（不是同尺寸）——
+    // shader 用 uv 采样，只要宽高比一致就不会错位。
     return DepthResult(
-      width: vw,
-      height: vh,
+      width: w,
+      height: h,
       data: out,
-      // 视差域的分位值换算回米数（仅用于界面展示）。
-      minMeters: 1.0 / math.max(hi, 1e-6),
-      maxMeters: 1.0 / math.max(lo, 1e-6),
+      minMeters: lo,
+      maxMeters: hi,
+      // DAV2 是相对视差，没有米制含义 —— 界面据此改用相对刻度，不再显示 "m"。
+      isMetric: false,
     );
   }
 }

@@ -250,7 +250,7 @@ abstract final class DepthLayerSplitter {
     //     ③ ★ 背景色扩散    → 背景的颜色沿边界长进主体区域，露出的是背景的自然
     //                          延续，而不是一块对不上的色斑
     //   （必须放在 split 之后 —— 扩散要先知道哪些像素算背景。）
-    final Uint8List soft = _diffusedFill(
+    final Uint8List softFilled = _diffusedFill(
       src: src,
       w: w,
       h: h,
@@ -259,6 +259,21 @@ abstract final class DepthLayerSplitter {
       // ★ 有语义 mask 时以 mask 为准（见 _diffusedFill 的参数说明）。
       mask: mw,
     );
+
+    // ★ 背景【边缘外推】：把背景像素的颜色从边界向主体区域逐层复制。
+    //   扩散填充得到的是低分辨率网格的"块平均色"，放大十几倍后与紧邻的真实
+    //   背景像素并不相等 —— 主体轮廓处因此有一圈色差（实测的"有边框"）。
+    //   外推直接复制【最近的背景像素】，轮廓处与周围背景严格相等，无缝。
+    //   只做 [24] 步：主体层始终盖着更深处，能被看到的只有轮廓外几像素。
+    final Uint8List soft = mw == null
+        ? softFilled
+        : _extrudeBackground(
+            src: src,
+            diffused: softFilled,
+            mask: mw,
+            w: w,
+            h: h,
+          );
 
     // ── 层下界（alpha 与"归属"都用它）──────────────────────────
     final List<double> los = <double>[];
@@ -328,11 +343,22 @@ abstract final class DepthLayerSplitter {
           //     smoothstep(0.45, 0.75) 把中间值压掉：只有真正判定为主体的像素
           //     才完全不透明；因为是渐变而非硬阈值，边缘不会出锯齿。
           //
-          // 层 0（背景）：alpha 恒 1 铺底；own 用更靠前的 smoothstep(0.35, 0.65)
-          //   把"原图↔填充"的混合带压窄。
+          // 层 0（背景）：alpha 恒 1 铺底；own = 1 − s，**与主体层的 alpha 用
+          //   同一个 s**（这是本轮修复的第二个点）。
+          //
+          //   ★ 为什么必须用同一个 s
+          //     旧写法是 own = 1 − smoothstep(0.35, 0.65, m)，比主体层的
+          //     smoothstep(0.45, 0.75) 提前了 0.1 —— 两个区间【错开】。后果：
+          //     在 m ∈ [0.35, 0.45] 这一圈里，背景层已经按 (1−own) 的比例混入
+          //     了【模糊填充】，而主体层的 alpha 还是 0、完全没有覆盖 —— 于是
+          //     主体轮廓外独自露出一圈"糊边"。实测反馈："前景与背景区分很
+          //     割裂（有边框）"，就是这个环带。
+          //     改成同一个 s 后，背景层混入模糊的比例恒等于主体层已覆盖的比例，
+          //     两者严格同步，"没人盖的糊边环带"不复存在。
           final double m = mw[p];
-          a = i == 0 ? 1.0 : _smoothstep(0.45, 0.75, m);
-          own = i == 0 ? 1.0 - _smoothstep(0.35, 0.65, m) : 1.0;
+          final double s = _smoothstep(0.45, 0.75, m);
+          a = i == 0 ? 1.0 : s;
+          own = i == 0 ? 1.0 - s : 1.0;
         } else {
           final int bi = (dw[p] * (bins - 1)).round().clamp(0, bins - 1);
           a = aOf[bi];
@@ -923,6 +949,85 @@ abstract final class DepthLayerSplitter {
 
   /// 原图的大幅模糊版（填充层的非本层区域）。
   ///
+  /// 背景【边缘外推】：把背景像素的颜色从边界向主体区域逐层复制。
+  ///
+  /// ★ 为什么需要它（实测："前景与背景区分很割裂（有边框）"）
+  ///   [_diffusedFill] 是在长边仅 96 的低分辨率网格上求"块平均色"，再双线性
+  ///   放大回工作尺寸（放大十几倍）。于是主体轮廓处拿到的【不是】紧邻的那个
+  ///   背景像素的颜色，而是"一小片区域的平均色"—— 两者必然有差，轮廓上就有了
+  ///   一圈可见的色差，看起来像给主体描了一道边。
+  ///
+  ///   外推换了个思路：不做平均，直接【复制最近的背景像素】。轮廓处拿到的就是
+  ///   紧贴它的那个背景像素，颜色严格相等 —— 静止时完全看不出接缝。
+  ///
+  /// ★ 为什么只外推有限步
+  ///   主体层始终覆盖着主体区域，能被看到的只有轮廓外几像素的环带（层间位移
+  ///   最大 6px，而 [maxSteps] = 24）。更深处永远看不见，用 [_diffusedFill] 的
+  ///   模糊色兜底即可，也避免了大面积复制产生的"条纹拉丝"。
+  ///
+  /// ★ 成本：多源 BFS 一趟 O(n)，与 [_diffusedFill] 的迭代扩散同量级。
+  ///
+  /// [src] 原图 RGBA（工作尺寸）；[diffused] 模糊填充版作为兜底；
+  /// [mask] 工作尺寸语义 mask，值 > 0.5 视为主体（不作为颜色源）。
+  static Uint8List _extrudeBackground({
+    required Uint8List src,
+    required Uint8List diffused,
+    required Float32List mask,
+    required int w,
+    required int h,
+    int maxSteps = 24,
+  }) {
+    final int n = w * h;
+    final Int32List from = Int32List(n); // 最近背景像素的下标；-1 = 未访问
+    final Int32List dist = Int32List(n);
+    final Int32List queue = Int32List(n);
+    int head = 0;
+    int tail = 0;
+
+    for (int p = 0; p < n; p++) {
+      if (mask[p] <= 0.5) {
+        from[p] = p; // 背景像素自己就是源
+        dist[p] = 0;
+        queue[tail++] = p;
+      } else {
+        from[p] = -1;
+      }
+    }
+    if (tail == 0) return diffused; // mask 全为主体 → 没有颜色源，原样返回
+
+    while (head < tail) {
+      final int p = queue[head++];
+      final int d = dist[p];
+      if (d >= maxSteps) continue;
+      final int y = p ~/ w;
+      final int x = p - y * w;
+      final int origin = from[p];
+      for (int k = 0; k < 4; k++) { // 4 邻域：够用，分支比 8 邻域少一半
+        final int nx = x + (k == 0 ? -1 : (k == 1 ? 1 : 0));
+        final int ny = y + (k == 2 ? -1 : (k == 3 ? 1 : 0));
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        final int q = ny * w + nx;
+        if (from[q] != -1) continue;
+        from[q] = origin;
+        dist[q] = d + 1;
+        queue[tail++] = q;
+      }
+    }
+
+    final Uint8List out = Uint8List.fromList(diffused);
+    for (int p = 0; p < n; p++) {
+      if (mask[p] <= 0.5) continue; // 背景像素本身不动
+      final int f = from[p];
+      if (f < 0) continue; // 超出 maxSteps → 保留模糊兜底
+      final int s = f * 4;
+      final int o = p * 4;
+      out[o] = src[s];
+      out[o + 1] = src[s + 1];
+      out[o + 2] = src[s + 2];
+    }
+    return out;
+  }
+
   /// 已被 [_diffusedFill] 取代（背景色扩散更自然，见其说明），保留以备对照与回退。
   // ignore: unused_element
   static Future<Uint8List> _blurredRgba(

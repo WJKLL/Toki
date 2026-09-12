@@ -100,8 +100,19 @@ flutter:
   assets:
     - assets/tools/tools.json
     - assets/images/app_icon.png
-    # v1.52.0（S-31 空间壁纸）：端侧深度模型（YOLO26-n depth，FP16 dynamic，约 10 MB）
-    - assets/models/yolo26n-depth_fp16.onnx
+    # v1.52.0（S-31 空间壁纸）：端侧深度模型。
+    #   ★ 已从 YOLO26-n depth 换成 Depth Anything V2 Small（int8，约 26 MB）。
+    #     换的原因：自然风景是 YOLO26 的短板 —— 实测"富士山 + 樱花"那张，画面
+    #     【下方】的近景樱花树丛被判成【最远】（上下半均值差 −0.120，方向反了）；
+    #     同一张图 DAV2 给出 +0.010（正确）。8 张测试图 DAV2 全部通过
+    #     "下方比上方近"的常识性校验。
+    #     int8 是实测过的：与 fp32 相关系数 0.9960、Otsu 切点偏移均值 0.0078、
+    #     体积 99.1 → 27.1 MB。
+    #     ⚠️ 本项目有"深度模型 int8 会崩（a8 collapses the depth map）"的历史
+    #        记录（见 quant_seg.py），所以这里的 int8 是实测通过才用的。
+    #     ⚠️ DAV2 输出【相对视差】而非米制 —— DepthResult.isMetric = false，
+    #        界面不得再把 minMeters/maxMeters 当米数展示。
+    - assets/models/dav2-small_int8.onnx
     # v1.53.0（S-39 主体分割）：与深度分层配合 —— 深度只能回答"远近"，回答不了
     #   "这是不是人"：实测插画上浅蓝格子裙被估成 2.52m（比背景柱子的 2.14m 还远），
     #   而前景柱子又会被判成主体。用分割 mask 约束层归属可一次解决两者。

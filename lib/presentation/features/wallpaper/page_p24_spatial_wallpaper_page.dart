@@ -211,8 +211,20 @@ class _PageP24SpatialWallpaperPageState
   ///   的原因。现在主体层之下有背景层兜底、空洞会被填上，而起伏只有几个
   ///   像素、远小于主体自身尺寸，所以可以安全启用。
   ///
-  ///   取 6 → 主体内部起伏约 ±3px：够看出体积，又不会把空洞撑大。
-  static const double _relief = 6;
+  /// ★ 取 1.5（本轮修复，原来是 6）
+  ///   原来 ±3px 的逐像素起伏根本不成立 —— 它做出的是【液化揉搓】，不是立体：
+  ///     · 物理上主体内部的视差差极小：鼻梁 1.5m 与耳朵 2.0m 换算成视差只差
+  ///       0.167，而全画面的归一化视差范围约 0.6 —— 落到 3px 的总位移上只有
+  ///       约 0.8px。取 6 相当于把真实值放大了 3~6 倍。
+  ///     · 更要命的是这个位移场会随【晃动方向】整体翻转：晃动过程中主体内部
+  ///       被来回拉扯，观感就是"揉"。实测反馈："主体在镜头晃动时那种扭曲感
+  ///       做的很不自然"。
+  ///   降到 1.5 → 主体内部起伏约 ±0.75px：保留了"不是一块平板"的体积暗示，
+  ///   又小到看不出形变。
+  ///
+  ///   ⚠️ 别把"物理正确值"当目标 —— 那只有亚像素，观感上等于没有立体感。
+  ///      这里取的是"略大于物理、但远低于可见形变阈值"的折中。
+  static const double _relief = 1.5;
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -358,7 +370,9 @@ class _PageP24SpatialWallpaperPageState
         setState(() => _aiInfo = '当前平台未注册深度推理实现');
         return;
       }
-      final DepthResult? r = await engine.infer(bytes, inputSize: 640);
+      // ★ 不传 inputSize：DAV2 的输入边长是"面积对齐 518² + 取整到 14 的倍数"
+      //   算出来的，由实现内部决定（旧 YOLO26 才需要外部指定 640）。
+      final DepthResult? r = await engine.infer(bytes);
       sw.stop();
       if (!mounted) return;
       if (r == null) {
@@ -412,9 +426,15 @@ class _PageP24SpatialWallpaperPageState
         final String segInfo = mask == null
             ? ' · 无主体分割'
             : ' · 主体 ${(mask.coverage * 100).round()}%';
+        // ★ 单位随模型变：DAV2 输出的是相对视差，没有米制含义 ——
+        //   再在它后面标一个 "m" 就是误导（旧 YOLO26 是米制才该标）。
+        final String rangeInfo = r.isMetric
+            ? '${r.minMeters.toStringAsFixed(2)}~'
+                '${r.maxMeters.toStringAsFixed(2)} m'
+            : '视差 ${r.minMeters.toStringAsFixed(2)}~'
+                '${r.maxMeters.toStringAsFixed(2)}';
         _aiInfo = 'AI 深度 · ${sw.elapsedMilliseconds} ms · '
-            '${r.minMeters.toStringAsFixed(2)}~'
-            '${r.maxMeters.toStringAsFixed(2)} m$layerInfo$segInfo';
+            '$rangeInfo$layerInfo$segInfo';
       });
     } catch (e) {
       if (mounted) setState(() => _aiInfo = '异常：$e');
