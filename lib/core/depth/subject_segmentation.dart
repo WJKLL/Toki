@@ -145,6 +145,51 @@ class SubjectMask {
   SubjectMask closed(int radius) =>
       radius <= 0 ? this : dilated(radius).eroded(radius);
 
+  /// 盒式平滑（半径 [radius]）：把 mask 边缘的台阶磨成斜坡，消除"毛糙"。
+  ///
+  /// ★ 与 [closed] / [eroded] 的分工（两者不能互相替代）
+  ///   [dilated] / [eroded] / [closed] 是**形态学**操作 —— 它们靠移动轮廓来
+  ///   改变形状，半径一大就把整体轮廓推歪；本方法是**低通** —— 轮廓位置不动，
+  ///   只把边缘的台阶磨顺。
+  ///
+  /// ★ 为什么磨过之后不会让边缘变糊
+  ///   渲染侧对 mask 还会做一次 `smoothstep(0.45, 0.75, m)` 陡化，斜坡会被
+  ///   重新压回硬边。所以这里的平滑只吃掉"锯齿/毛刺"，不引入羽化。
+  ///   实测反馈："躯干回来了，边缘毛糙" —— 毛糙来自分割模型 512/1024 分辨率
+  ///   输出的边缘台阶，本方法即为它准备。
+  ///
+  /// 可分离实现（横一遍、竖一遍），O(n·radius)，与 [dilated] 同量级。
+  SubjectMask smoothed(int radius) {
+    if (radius <= 0) return this;
+    final int n = data.length;
+    final Float32List tmp = Float32List(n);
+    final Float32List out = Float32List(n);
+    for (int y = 0; y < height; y++) {
+      final int row = y * width;
+      for (int x = 0; x < width; x++) {
+        final int x0 = math.max(0, x - radius);
+        final int x1 = math.min(width - 1, x + radius);
+        double s = 0;
+        for (int k = x0; k <= x1; k++) {
+          s += data[row + k];
+        }
+        tmp[row + x] = s / (x1 - x0 + 1);
+      }
+    }
+    for (int y = 0; y < height; y++) {
+      final int y0 = math.max(0, y - radius);
+      final int y1 = math.min(height - 1, y + radius);
+      for (int x = 0; x < width; x++) {
+        double s = 0;
+        for (int k = y0; k <= y1; k++) {
+          s += tmp[k * width + x];
+        }
+        out[y * width + x] = s / (y1 - y0 + 1);
+      }
+    }
+    return SubjectMask(width: width, height: height, data: out);
+  }
+
   /// 双线性重采样到 [w]×[h]。
   ///
   /// 供 DepthLayerSplitter 对齐到它自己的工作尺寸用 —— mask 是软概率，

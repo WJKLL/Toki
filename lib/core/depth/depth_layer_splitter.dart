@@ -148,10 +148,19 @@ abstract final class DepthLayerSplitter {
       final int sw = subj.width;
       final int sh = subj.height;
       if (sw > 0 && sh > 0 && w > 0 && h > 0) {
-        // ① 闭运算：填补 mask 内部的凹陷与断裂（不推大整体轮廓）。
+        // ① 连通域筛选：剔掉与主体【空间上不连通】的孤立块（实测的"背景块"）。
+        //    ★ 必须在闭运算【之前】—— `closed()` 会把相距不远的块连成一体，
+        //    一旦连上，背景块就成了"主体的一部分"，再也分不出来。
+        subj = SubjectMask(
+          width: sw,
+          height: sh,
+          data: _keepMainComponents(subj.data, sw, sh),
+        );
+
+        // ② 闭运算：填补 mask 内部的凹陷与断裂（不推大整体轮廓）。
         subj = subj.closed(math.max(2, (sw * 0.02).round()));
 
-        // ② ★★ 这里【不再用深度做任何剔除】—— 本轮根因修复，勿轻易加回。
+        // ③ ★★ 这里【不再用深度做任何剔除】—— 勿轻易加回。
         //
         //   原位置是 _keepConnected(tol 0.15) + _depthFloor(25分位 − margin 0.12)。
         //   两者都是【纯深度阈值分割时代】的补丁：那时主体 mask 是从深度推出来的，
@@ -176,15 +185,23 @@ abstract final class DepthLayerSplitter {
         //     正确手段是 U-14 手动涂刷，而不是再让深度插一脚 —— 深度一旦
         //     介入就会把躯干一起带走，代价远大于收益。
         //     两个函数仍保留在类内（unused_element），需要时原位恢复。
+        //     ★ "背景块跟着主体动"由上面的 ① 连通域筛选负责 —— 那是**几何**
+        //       判据（连不连通），不需要深度参与，换深度模型也解决不了它。
       }
-      // ③ 膨胀：抵消"背景层比主体层多走的距离"，防止背景层里的填充滑出轮廓。
+      // ④ 膨胀：抵消"背景层比主体层多走的距离"，防止背景层里的填充滑出轮廓。
       if (subjectDilate > 0.5 && photo.width > 0) {
         final SubjectMask s = subj;
         // 逻辑像素 → mask 自身分辨率的像素（在 mask 分辨率上膨胀，快一个数量级）
         subj = s.dilated((subjectDilate * s.width / photo.width).round());
       }
 
-      // ④ ★ 手动修正层放在【最后】：用户说了算，压过前面所有自动处理。
+      // ⑤ 边缘低通：把分割模型（512 / 1024 输入）带来的边缘台阶磨顺。
+      //    实测反馈"边缘毛糙"即来自这些台阶 —— resample 已是双线性，故毛糙
+      //    不是放大造成的，而是量化台阶。放在膨胀之后磨的是最终轮廓；半径 1
+      //    很小，只吃锯齿、不动形状（渲染侧还会再陡化一次，不会变糊）。
+      subj = subj.smoothed(1);
+
+      // ⑥ ★ 手动修正层放在【最后】：用户说了算，压过前面所有自动处理。
       //    放在膨胀之后是有意的 —— 用户擦掉的地方不该再被膨胀加回来。
       if (editMask != null && !editMask.isEmpty) {
         final int sw2 = subj.width;
@@ -371,6 +388,116 @@ abstract final class DepthLayerSplitter {
   ///   于是改为在 mask 内部从核心区域做 BFS，只走"局部深度连续"的邻居。
   ///
   /// [tol] 相邻像素深度容差；[seedMin] 作为种子的 mask 核心阈值。
+  /// 连通域筛选：剔掉与主体【空间上不连通】的孤立块。
+  ///
+  /// ★ 为什么判据必须是纯几何，不能用深度（拿两轮实测换来的结论）
+  ///   本方法是已停用的 [_keepConnected] 的接替者。那个用"深度连续性"判断
+  ///   哪块算主体，结果把【躯干】和【背景块】一起剔了 —— 因为躯干深度接近
+  ///   背景（详见其说明）。去掉它之后实测反馈："躯干回来了，但背景块跟着
+  ///   主体动"，正好印证两个判据的能力恰好相反：
+  ///     · 躯干     与身体【空间相连】   → 几何判据留得住；深度判据误剔
+  ///     · 背景块   与身体【空间不相连】 → 几何判据剔得掉；深度判据分不清
+  ///   于是判据换成"和主体连不连通"，与深度彻底脱钩。
+  ///
+  /// ★ 必须在形态学闭运算【之前】调用
+  ///   `closed()` 会把相距不远的块连成一体 —— 一旦连上，背景块就再也分不出来
+  ///   （它会变成"主体的一部分"）。所以顺序是先筛连通域、再做闭运算。
+  ///
+  /// ★ 保守取向：宁可漏剔，不可误剔
+  ///   误剔（把手臂 / 第二个人当背景块扔掉）**不可恢复**；漏剔（背景块留下）
+  ///   还能用 U-14 手动涂刷擦掉。故 [areaRatio] 取得很大：只要某连通域面积达到
+  ///   主块的 [areaRatio]，**无论离多远都保留** —— 照片里有两个人的时候，
+  ///   第二个人正好是这个量级，绝不能被当成背景块剔掉。
+  ///
+  /// [gapRatio] 相对 mask 短边：间隙在此以内的连通域视为"主体被遮挡/漏抠而
+  ///   分离的部分"（手臂、断开的腿），保留。
+  /// [areaRatio] 相对主块面积：达到即保留（防止误剔第二个人或大肢块）。
+  static Float32List _keepMainComponents(
+    Float32List mask,
+    int w,
+    int h, {
+    double gapRatio = 0.02,
+    double areaRatio = 0.30,
+  }) {
+    final int n = w * h;
+    final Int32List label = Int32List(n); // 0 = 未标记（含软边缘）, >0 = 连通域编号
+    final Int32List stack = Int32List(n);
+    final List<int> area = <int>[0]; // 下标 0 占位，与编号对齐
+    final List<int> cx0 = <int>[0];
+    final List<int> cy0 = <int>[0];
+    final List<int> cx1 = <int>[0];
+    final List<int> cy1 = <int>[0];
+
+    int comps = 0;
+    for (int i = 0; i < n; i++) {
+      // 只对【硬核】做连通域标记；软边缘（0 < v ≤ 0.5）不参与，
+      // 它们随后原样保留，交给渲染侧的 smoothstep 陡化处理。
+      if (label[i] != 0 || mask[i] <= 0.5) continue;
+      comps++;
+      int top = 1;
+      stack[0] = i;
+      label[i] = comps;
+      int cnt = 0;
+      int minX = w;
+      int minY = h;
+      int maxX = -1;
+      int maxY = -1;
+      while (top > 0) {
+        final int p = stack[--top];
+        final int y = p ~/ w;
+        final int x = p - y * w;
+        cnt++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        // 8 邻域：避免把对角相接的部分切成两块
+        final int yA = y > 0 ? y - 1 : 0;
+        final int yB = y < h - 1 ? y + 1 : h - 1;
+        final int xA = x > 0 ? x - 1 : 0;
+        final int xB = x < w - 1 ? x + 1 : w - 1;
+        for (int ny = yA; ny <= yB; ny++) {
+          final int row = ny * w;
+          for (int nx = xA; nx <= xB; nx++) {
+            final int q = row + nx;
+            if (label[q] != 0 || mask[q] <= 0.5) continue;
+            label[q] = comps;
+            stack[top++] = q;
+          }
+        }
+      }
+      area.add(cnt);
+      cx0.add(minX);
+      cy0.add(minY);
+      cx1.add(maxX);
+      cy1.add(maxY);
+    }
+
+    if (comps <= 1) return mask; // 只有一块 → 没有可剔的对象
+
+    int main = 1;
+    for (int c = 2; c <= comps; c++) {
+      if (area[c] > area[main]) main = c;
+    }
+    final double gap = gapRatio * math.min(w, h);
+    final double areaMin = area[main] * areaRatio;
+
+    final Float32List out = Float32List.fromList(mask);
+    for (int i = 0; i < n; i++) {
+      final int c = label[i];
+      if (c == 0 || c == main) continue; // 软边缘 / 主块：原样保留
+      if (area[c] >= areaMin) continue; // 够大 → 可能是第二个人 / 大肢块
+      // 与主块包围盒的轴向分离量（平方比较，避免开方）
+      final int gapX =
+          math.max(0, math.max(cx0[main] - cx1[c], cx0[c] - cx1[main]));
+      final int gapY =
+          math.max(0, math.max(cy0[main] - cy1[c], cy0[c] - cy1[main]));
+      if (gapX * gapX + gapY * gapY <= gap * gap) continue; // 紧贴主体 → 保留
+      out[i] = 0.0; // 远离主体的小块 → 剔除
+    }
+    return out;
+  }
+
   // ★ 已停用：见 split() 中「不再用深度做任何剔除」的说明 —— 它的判据（深度
   //   连通性）在躯干处不可靠，会把语义分割抠对的身体判成背景。保留备查。
   // ignore: unused_element
