@@ -1,5 +1,10 @@
 // lib/presentation/features/wallpaper/page_p24_spatial_wallpaper_page.dart
-// 编号：P-24 空间壁纸编辑器（R-20 /spatial-wallpaper）
+// 编号：P-24 空间图片编辑器（R-20 /spatial-wallpaper）
+//
+// ★ 名字是「空间图片」，不是「空间壁纸」：本功能**不接入系统壁纸**
+//   （不碰 Android / HarmonyOS 的系统壁纸 API，也不做锁屏替换），
+//   产出的是可保存与分享的图片。文件名与路由路径保留 wallpaper 是为了
+//   不动既有引用，**用户可见的文案一律用「空间图片」**。
 //
 // 阶段 1 雏形（2026-09-11）：打通【图片 + 深度图 → 视差渲染 → 焦点设定】链路。
 // 深度来源暂用 U-12 预设景深模板（决策 B4），AI 深度推理（S-31）尚未接入 ——
@@ -323,6 +328,13 @@ class _PageP24SpatialWallpaperPageState
   Offset _sensorShift = Offset.zero;
   Offset _joystickShift = Offset.zero;
   StreamSubscription<Offset>? _tiltSub;
+
+  /// 二级子工具的选中项（对齐澎湃编辑器的两级菜单）。
+  ///
+  /// ★ 为什么要分两级：参数已经多到一屏放不下（光「主体」就有 深度来源 /
+  ///   内容类型 / 手动涂刷 三组），全平铺出来只能靠滚动翻找。
+  ///   分成两级之后"一屏只显示一件事"，找参数从"翻列表"变成"点图标"。
+  int _subTab = 0;
   bool _busy = false;
 
   // ── 组件（S-38 / C-67 · PLAN_components_v1.53.md 期 1）──────────
@@ -1124,36 +1136,37 @@ class _PageP24SpatialWallpaperPageState
   /// 顶部栏：返回 / 撤销 / 导入 / 保存 / 更多（对齐系统相册编辑器的动作集合）。
   Widget _buildTopBar() {
     return C25FrostedTopBar(
-      title: '空间壁纸',
-      largeTitle: '空间壁纸',
+      // ★ 叫「空间图片」而不是「空间壁纸」——本功能**不接入系统壁纸**：
+      //   不碰 Android / HarmonyOS 的系统壁纸 API，也不做锁屏替换，
+      //   产出的是可保存与分享的图片。叫「壁纸」会让人以为能设成锁屏。
+      title: '空间图片',
+      largeTitle: '空间图片',
       navigationIcon: _backButton,
       actions: <Widget>[
-        C21CapsuleIconButton(
+        _RoundIconButton(
           key: const ValueKey<String>('wallpaper.undo'),
           icon: appIcon('undo'),
           tooltip: '撤销',
           // 无可撤销笔迹时置灰（onTap 为 null）
           onTap: _undoStack.isEmpty ? null : _undoBrush,
         ),
-        C21CapsuleIconButton(
+        _RoundIconButton(
           key: const ValueKey<String>('wallpaper.pickTop'),
           icon: appIcon('image'),
           tooltip: '导入图片',
           onTap: () => unawaited(_pickPhoto()),
         ),
-        C21CapsuleIconButton(
+        _RoundIconButton(
           key: const ValueKey<String>('wallpaper.history'),
           icon: appIcon('tasks'),
           tooltip: '编辑历史',
           onTap: () => unawaited(_openHistory()),
         ),
-        C21CapsuleIconButton(
+        // 澎湃那套：保存是独立的胶囊按钮，不是图标 —— 它是这一屏的主操作。
+        _SavePill(
           key: const ValueKey<String>('wallpaper.save'),
-          icon: appIcon('download'),
-          tooltip: '保存到相册',
-          onTap: _photo == null || _busy
-              ? null
-              : () => unawaited(_saveToGallery()),
+          onTap:
+              _photo == null || _busy ? null : () => unawaited(_saveToGallery()),
         ),
         const C26MoreMenu(),
       ],
@@ -1376,8 +1389,8 @@ class _PageP24SpatialWallpaperPageState
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // ══════════ 1 主体 ══════════
-          if (_toolTab == 1) ...<Widget>[
+          // ══════════ 1 主体 · 二级 0「深度来源」══════════
+          if (_toolTab == 1 && _subTab == 0) ...<Widget>[
             // ── 深度来源：几何模板（B4 降级链的最后一级）──
             Row(
               children: <Widget>[
@@ -1523,16 +1536,15 @@ class _PageP24SpatialWallpaperPageState
           //   既得到"主体不动、背景滑动"的观感，又不会切出硬分割线。
           // ══════════ 3 焦点（几何模板用）══════════
           if (_toolTab == 3) ...<Widget>[
-          MiuixSliderPreference(
+          _ParamSlider(
             title: '焦点带',
-            summary: _focusBand < 0.005
-                ? '关闭（只有焦点那条等深线钉住）'
-                : '±${(_focusBand * 100).round()}%（主体整片钉住）',
             value: _focusBand,
             min: 0,
             max: 0.4,
-            insideMargin: _itemMargin,
-            onValueChange: (double v) => setState(() => _focusBand = v),
+            valueText: _focusBand < 0.005
+                ? '关闭'
+                : '±${(_focusBand * 100).round()}%',
+            onChanged: (double v) => setState(() => _focusBand = v),
           ),
           MiuixSliderPreference(
             title: '深度分层',
@@ -1548,14 +1560,12 @@ class _PageP24SpatialWallpaperPageState
             insideMargin: _itemMargin,
             onValueChange: (double v) => setState(() => _layers = v),
           ),
-          MiuixSliderPreference(
+          _ParamSlider(
             title: '深度曲线',
-            summary: _gamma.toStringAsFixed(2),
             value: _gamma,
             min: 0.5,
             max: 2.5,
-            insideMargin: _itemMargin,
-            onValueChange: (double v) => setState(() => _gamma = v),
+            onChanged: (double v) => setState(() => _gamma = v),
           ),
           ], // ══════════ /3 焦点 ══════════
 
@@ -1673,7 +1683,7 @@ class _PageP24SpatialWallpaperPageState
           // ══ U-14 手动修正（涂刷 / 擦除）· 归入「主体」页 ══
           // 自动分割在边界模糊处永远有误差；"哪块像素是人"这件事，用户刷一笔
           // 比任何启发式都准。它与 AI 互补 —— 只修 AI 做错的那一两处。
-          if (_toolTab == 1) ...<Widget>[
+          if (_toolTab == 1 && _subTab == 1) ...<Widget>[
           const SizedBox(height: 10),
           MiuixText('手动修正', style: MiuixTheme.of(context).textStyles.body1),
           const SizedBox(height: 6),
@@ -1814,106 +1824,105 @@ class _PageP24SpatialWallpaperPageState
   /// 工具行（对齐系统相册编辑器：图标+文字、选中态高亮、再点一次收起）。
   ///
   /// 收起的价值：画面能拿回那 30% 的高度（相册编辑器也允许工具行隐藏）。
-  /// 底部工具行（对齐系统相册编辑器）：
-  /// **图标 + 文字、横向可滚动、选中用主题色**，末尾一个 ✓ 收起参数面板。
-  ///
-  /// 与上一版的差别：原来是 6 个等宽文字按钮挤在一行，再加一个工具就得再挤一轮；
-  /// 改成横向滚动之后，以后要加「滤镜 / 模板」之类不必再动布局。
-  Widget _buildToolBar(MiuixColors colors) {
-    // (id, 标签, 图标名) —— 图标名都取自 app_icons 里已有的集合。
-    const List<(int, String, String)> tools = <(int, String, String)>[
-      (1, '主体', 'edit'),
-      (2, '空间', 'layers'),
-      (3, '焦点', 'tune'),
-      (4, '组件', 'add'),
-      (5, '导出', 'download'),
-    ];
-    return SizedBox(
-      height: 64,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        children: <Widget>[
-          for (final (int id, String label, String icon) in tools)
-            _toolItem(id, label, icon, colors),
-          _toolItem(-1, '调试', 'info', colors, debug: true),
-          // ✓ 完成 —— 相册编辑器工具行末尾的确认键，收起参数面板。
-          if (_toolTab != 0)
-            GestureDetector(
-              key: const ValueKey<String>('wallpaper.tab.confirm'),
-              behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() {
-                _toolTab = 0;
-                _brushMode = 0;
-              }),
-              child: SizedBox(
-                width: 60,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    MiuixIcon(
-                      vector: MiuixIcons.basic.check,
-                      size: 26,
-                      tint: colors.primary,
-                    ),
-                    const SizedBox(height: 3),
-                    MiuixText(
-                      '完成',
-                      style: MiuixTheme.of(context).textStyles.body2,
-                      color: colors.primary,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  /// 一级分类（最底部一行）。
+  static const List<(int, String, String)> _categories =
+      <(int, String, String)>[
+    (1, '主体', 'edit'),
+    (2, '空间', 'layers'),
+    (3, '焦点', 'tune'),
+    (4, '组件', 'add'),
+    (5, '导出', 'download'),
+  ];
 
-  /// 工具行的一项：上图下文，选中用主题色。
-  Widget _toolItem(
-    int id,
-    String label,
-    String icon,
-    MiuixColors colors, {
-    bool debug = false,
-  }) {
-    final bool on = debug ? _debugOpen : _toolTab == id;
-    return GestureDetector(
-      key: ValueKey<String>(
-        debug ? 'wallpaper.tab.debug' : 'wallpaper.tab.$id',
-      ),
-      behavior: HitTestBehavior.opaque,
-      onTap: () => setState(() {
-        if (debug) {
-          _debugOpen = !_debugOpen;
-          return;
-        }
-        _toolTab = on ? 0 : id;
-        // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
-        // 用户回去想点画面设焦点会发现点不动。
-        if (_toolTab != 1) _brushMode = 0;
-      }),
-      child: SizedBox(
-        width: 62,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MiuixIcon(
-              vector: appIcon(icon),
-              size: 24,
-              tint: on ? colors.primary : colors.onSurfaceVariantSummary,
+  /// 二级子工具：(标签, 图标名)，按一级分类索引。
+  ///
+  /// ★ 目前只有「主体」真正分成两段（深度来源 / 涂抹修正）—— 它的控件本来
+  ///   就分成了两组，切开是干净的。其余分类的参数还没细分到"一段一个子工具"，
+  ///   所以先各给一条当段落标题。
+  ///   **不做假的二级**：点上去没反应的按钮比没有更糟。
+  static const Map<int, List<(String, String)>> _subTools =
+      <int, List<(String, String)>>{
+    1: <(String, String)>[
+      ('深度来源', 'image'),
+      ('涂抹修正', 'edit'),
+    ],
+    2: <(String, String)>[
+      ('晃动与视差', 'play'),
+    ],
+    3: <(String, String)>[
+      ('焦点与深度', 'tune'),
+    ],
+    4: <(String, String)>[
+      ('组件', 'add'),
+    ],
+    5: <(String, String)>[
+      ('导出图片', 'download'),
+    ],
+  };
+
+  /// 底部两级工具行（对齐澎湃相册编辑器）。
+  ///
+  ///   上排 = 当前分类的【子工具】：圆角方块 + 选中高亮环
+  ///   下排 = 【一级分类】    ：更小，选中用胶囊底色
+  Widget _buildToolBar(MiuixColors colors) {
+    final List<(String, String)> subs =
+        _subTools[_toolTab] ?? const <(String, String)>[];
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (subs.isNotEmpty)
+          SizedBox(
+            height: 68,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              children: <Widget>[
+                for (int i = 0; i < subs.length; i++)
+                  _ToolTile(
+                    key: ValueKey<String>('wallpaper.sub.$i'),
+                    label: subs[i].$1,
+                    icon: appIcon(subs[i].$2),
+                    selected: _subTab == i,
+                    onTap: () => setState(() => _subTab = i),
+                  ),
+              ],
             ),
-            const SizedBox(height: 3),
-            MiuixText(
-              label,
-              style: MiuixTheme.of(context).textStyles.body2,
-              color: on ? colors.primary : colors.onSurfaceVariantSummary,
-            ),
-          ],
+          ),
+        SizedBox(
+          height: 60,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: <Widget>[
+              for (final (int id, String label, String icon) in _categories)
+                _CategoryPill(
+                  key: ValueKey<String>('wallpaper.tab.$id'),
+                  label: label,
+                  icon: appIcon(icon),
+                  selected: _toolTab == id,
+                  onTap: () => setState(() {
+                    if (_toolTab == id) {
+                      _toolTab = 0;
+                    } else {
+                      _toolTab = id;
+                      _subTab = 0; // 换分类时二级回到第一个
+                    }
+                    // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
+                    // 用户回去想点画面设焦点会发现点不动。
+                    if (_toolTab != 1) _brushMode = 0;
+                  }),
+                ),
+              _CategoryPill(
+                key: const ValueKey<String>('wallpaper.tab.debug'),
+                label: '调试',
+                icon: appIcon('info'),
+                selected: _debugOpen,
+                onTap: () => setState(() => _debugOpen = !_debugOpen),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -2420,6 +2429,317 @@ class _JoystickPad extends StatelessWidget {
     final Offset d = local - const Offset(_size / 2, _size / 2);
     onChanged(
       Offset((d.dx / r).clamp(-1.0, 1.0), (d.dy / r).clamp(-1.0, 1.0)),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 编辑器 UI 组件（对齐小米澎湃相册编辑器）
+//
+// 结构：
+//   顶栏     ✕ · ↶ · ↷ · [保存] · ⋮        （_RoundIconButton / _SavePill）
+//   控件区   当前子工具的滑卡 / 开关
+//   二级行   子工具 —— 圆角方块 + 图标 + 文字，选中描一圈高亮环（_ToolTile）
+//   一级行   主分类 —— 更小，选中用胶囊底色（_CategoryPill）
+// ══════════════════════════════════════════════════════════════
+
+/// 顶栏圆形描边图标按钮（澎湃那套：一圈细描边 + 居中图标）。
+class _RoundIconButton extends StatelessWidget {
+  const _RoundIconButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    this.onTap,
+  });
+
+  final MiuixVectorIcon icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final bool on = onTap != null;
+    final Color fg = on
+        ? colors.onSurface
+        : colors.onSurfaceVariantSummary.withValues(alpha: 0.35);
+    // 用 Semantics 而不是 material 的 Tooltip —— 本页只引 widgets 层，
+    // 不为了一个悬浮提示把整个 material 拉进来。
+    return Semantics(
+      label: tooltip,
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: 38,
+          height: 38,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: fg.withValues(alpha: on ? 0.45 : 0.2),
+                width: 1.2,
+              ),
+            ),
+            child: Center(
+              child: MiuixIcon(vector: icon, size: 19, tint: fg),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 顶栏右侧的胶囊按钮（澎湃的「保存」）。
+class _SavePill extends StatelessWidget {
+  const _SavePill({super.key, this.onTap});
+
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final bool on = onTap != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: on
+              ? colors.onSurface.withValues(alpha: 0.12)
+              : colors.onSurface.withValues(alpha: 0.05),
+        ),
+        child: MiuixText(
+          '保存',
+          style: MiuixTheme.of(context).textStyles.body1,
+          color: on
+              ? colors.onSurface
+              : colors.onSurfaceVariantSummary.withValues(alpha: 0.35),
+        ),
+      ),
+    );
+  }
+}
+
+/// 一级工具（主分类）：图标 + 文字，选中时整块变成胶囊底色。
+class _CategoryPill extends StatelessWidget {
+  const _CategoryPill({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final MiuixVectorIcon icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final Color fg =
+        selected ? colors.onSurface : colors.onSurfaceVariantSummary;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: 58,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: selected
+              ? colors.onSurface.withValues(alpha: 0.14)
+              : const Color(0x00000000),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            MiuixIcon(vector: icon, size: 21, tint: fg),
+            const SizedBox(height: 4),
+            MiuixText(
+              label,
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: fg,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 二级工具（子工具）：圆角方块 + 图标 + 文字，**选中描一圈高亮环**。
+///
+/// 这一圈环是澎湃编辑器最显眼的识别特征 —— 用它而不是填充色，
+/// 是为了让"选中"在深色底上也一眼可辨，同时不遮挡图标本身。
+class _ToolTile extends StatelessWidget {
+  const _ToolTile({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final MiuixVectorIcon icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    // 澎湃的高亮环是暖金色；这里沿用主题的 primary，观感一致又不写死颜色。
+    final Color ring = colors.primary;
+    final Color fg =
+        selected ? colors.onSurface : colors.onSurfaceVariantSummary;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: 74,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: colors.onSurface.withValues(alpha: selected ? 0.10 : 0.05),
+          border: Border.all(
+            color: selected ? ring : const Color(0x00000000),
+            width: 1.6,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            MiuixIcon(vector: icon, size: 22, tint: fg),
+            const SizedBox(height: 5),
+            MiuixText(
+              label,
+              style: MiuixTheme.of(context).textStyles.body2,
+              color: fg,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 参数滑卡（澎湃风格）：圆角轨道 + 圆形滑块，左侧标题、右侧数值。
+///
+/// 与 MiuixSliderPreference 的差别：那个是"设置项"比例（整行、大留白），
+/// 编辑器里参数是密集高频操作，所以轨道更矮、数值靠右对齐、上下留白更小。
+class _ParamSlider extends StatelessWidget {
+  const _ParamSlider({
+    required this.title,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    this.valueText,
+  });
+
+  final String title;
+  final double value;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+  final String? valueText;
+
+  @override
+  Widget build(BuildContext context) {
+    final MiuixColors colors = MiuixTheme.of(context).colors;
+    final double t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              MiuixText(
+                title,
+                style: MiuixTheme.of(context).textStyles.body2,
+                color: colors.onSurfaceVariantSummary,
+              ),
+              const Spacer(),
+              MiuixText(
+                valueText ?? value.toStringAsFixed(2),
+                style: MiuixTheme.of(context).textStyles.body2,
+                color: colors.onSurface,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c) {
+              const double knob = 20;
+              final double usable = (c.maxWidth - knob).clamp(1.0, 1e6);
+              void seek(Offset local) => onChanged(
+                    (min + (local.dx - knob / 2) / usable * (max - min))
+                        .clamp(min, max),
+                  );
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (TapDownDetails d) => seek(d.localPosition),
+                onHorizontalDragUpdate: (DragUpdateDetails d) =>
+                    seek(d.localPosition),
+                child: SizedBox(
+                  height: 30,
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: <Widget>[
+                      // 轨道
+                      Container(
+                        height: 6,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(3),
+                          color: colors.onSurface.withValues(alpha: 0.14),
+                        ),
+                      ),
+                      // 已选段
+                      Container(
+                        height: 6,
+                        width: knob / 2 + usable * t,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(3),
+                          color: colors.primary.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      // 滑块
+                      Transform.translate(
+                        offset: Offset(usable * t, 0),
+                        child: Container(
+                          width: knob,
+                          height: knob,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colors.primary,
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: colors.primary.withValues(alpha: 0.35),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
