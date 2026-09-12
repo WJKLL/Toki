@@ -389,6 +389,41 @@ abstract final class DepthLayerSplitter {
     //   U-14 的原本语义（画笔=归主体 / 橡皮=移出主体）是自洽的，
     //   先恢复它；"选刷第几层"以后单独设计，不再和主体语义混在一起。
 
+    // ★★ U-14：擦除要真的把像素【还给背景】—— 只清 mask 是不够的。
+    //
+    //   误判的背景之所以被 AI 划进主体，往往正因为它的【深度】接近人；
+    //   所以只把它从 mask 里删掉，它仍会落进"最近的那个深度层"、
+    //   继续跟着主体动 —— 表现就是"橡皮擦了但没进背景"
+    //   （用户反馈："橡皮无法把误判的背景纳入背景"）。
+    //
+    //   ⇒ 擦除时把它的深度改写成【背景像素的中位深度】，于是它归入背景
+    //     所在的那一层、跟着背景一起动。
+    //   ★ 用中位数而不是"最远层中心"：最远层是天空那个距离，擦出来的块
+    //     会以最远层的速度动，反而看着像新分了一层（之前就踩过这个坑）。
+    if (editMask != null && !editMask.isEmpty && mw != null) {
+      final List<double> bg = <double>[];
+      for (int p = 0; p < w * h; p++) {
+        if (mw[p] <= 0.5) bg.add(dwUse[p]);
+      }
+      if (bg.length >= 16) {
+        bg.sort();
+        final double bgMedian = bg[bg.length ~/ 2];
+        for (int y = 0; y < h; y++) {
+          final int ey =
+              (y * editMask.height ~/ h).clamp(0, editMask.height - 1);
+          final int erow = ey * editMask.width;
+          final int row = y * w;
+          for (int x = 0; x < w; x++) {
+            final int ex =
+                (x * editMask.width ~/ w).clamp(0, editMask.width - 1);
+            if (editMask.data[erow + ex] < 0) {
+              dwUse[row + x] = bgMedian;
+            }
+          }
+        }
+      }
+    }
+
     final List<DepthLayer> layers = <DepthLayer>[];
     for (int i = 0; i < totalLayers; i++) {
       final bool isSubject = hasSubject && i == depthLayerCount;
