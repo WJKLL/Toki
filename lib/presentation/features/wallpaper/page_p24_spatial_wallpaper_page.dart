@@ -1007,47 +1007,20 @@ class _PageP24SpatialWallpaperPageState
                     if (_historyOpen)
                       Expanded(child: _buildHistoryPanel(colors))
                     else ...<Widget>[
-                      // ★★ 画面铺满整屏，参数区【浮在它上面】。
+                      // ★★ 图在上、参数在下（上下分栏）—— 撤销"浮层"做法。
                       //
-                      //   这是相册编辑器的标准做法（小米/华为/iOS 都一样）：
-                      //   图片是主角、占满可用区域，参数与工具行作为**覆盖层**
-                      //   浮在它下半部，而不是在 Column 里占掉一行高度。
+                      //   上一版我把参数做成浮在画面上的覆盖层，理由是"图占满整屏"。
+                      //   但覆盖层的字面意思就是【盖住图】—— 用户反馈
+                      //   "按钮还是遮挡画布"，说的就是它。
+                      //   相册编辑器（小米 / 华为 / iOS）实际是**上下分栏**：
+                      //   图占上半、工具占下半，两者绝不重叠。
                       //
-                      //   之前参数区是布局里的一行，直接吃掉 24% 屏高 ——
-                      //   竖图在"高度受限"的盒子里只能缩得很小
-                      //   （用户反馈："画布无法放大，被压缩很小"）。
-                      //   改成覆盖层之后，画面拿回那 24%，而且不再受参数区高度影响。
-                      Expanded(
-                        child: Stack(
-                          children: <Widget>[
-                            Positioned.fill(child: _buildStage(colors)),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              // 参数浮层给一层自上而下的暗色渐变兜底，
-                              // 否则参数文字压在亮画面上会看不清。
-                              child: DecoratedBox(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: <Color>[
-                                      Color(0x00000000),
-                                      Color(0xCC000000),
-                                      Color(0xF2000000),
-                                    ],
-                                    stops: <double>[0.0, 0.35, 1.0],
-                                  ),
-                                ),
-                                child: ConstrainedBox(
-                        // ★ 涂刷时把浮层压到 110px —— 只留画笔/橡皮那几个按钮，
-                        //   其余全部让给画布。
-                        //   用户反馈："都挡住画布了，就不能刷的时候隐藏么"：
-                        //   手指落笔的地方正是参数浮层的位置，等于没法下笔。
-                        constraints: BoxConstraints(
-                          maxHeight: _brushMode != 0 ? 110.0 : maxPanel,
-                        ),
+                      //   ★ 参数区是【按内容自适应】的（maxPanel 只是上限）：
+                      //     SingleChildScrollView 在松约束下会取内容高度，
+                      //     内容少时不会白占一块，图自然就大。
+                      Expanded(child: _buildStage(colors)),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: maxPanel),
                         // ★ 换分类 / 二级 / 三级 / 调试都走同一段过渡：淡入 + 轻微上移。
                         //   之前参数区是"啪"地整块换掉，观感很硬。
                         //   key 里带上三级状态才会真正触发切换动画 ——
@@ -1075,11 +1048,6 @@ class _PageP24SpatialWallpaperPageState
                             padding: const EdgeInsets.only(bottom: 2),
                             child: _buildControls(colors),
                           ),
-                        ),
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                       _buildToolBar(colors),
