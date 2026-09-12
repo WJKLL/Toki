@@ -1004,7 +1004,10 @@ class _PageP24SpatialWallpaperPageState
               //   画布会被挤到很小（用户反馈："三级菜单打开，编辑画布尺寸过小"）。
               final double maxPanel = MediaQuery.sizeOf(context).height * 0.24;
               return Material(
-                type: MaterialType.transparency,
+                // ★ 纯黑底：澎湃编辑器是**固定视觉**（不跟主题走）。
+                //   深色主题的底色通常带一点蓝/紫，跟纯黑并排一比就不像了。
+                type: MaterialType.canvas,
+                color: const Color(0xFF000000),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
@@ -2233,12 +2236,19 @@ class _PageP24SpatialWallpaperPageState
                     }),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: MiuixText(
+                      child: Text(
                         groups[i].$1,
-                        style: MiuixTheme.of(context).textStyles.body1,
-                        color: i == gi
-                            ? colors.onSurface
-                            : colors.onSurfaceVariantSummary,
+                        // ★ 用固定字号/颜色而不是主题的 body1：澎湃那行三级标签
+                        //   比正文大一档，且选中是纯白 + 加粗，对比更硬。
+                        //   走主题的话字重与灰度都偏软，一列看过去"发灰"。
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight:
+                              i == gi ? FontWeight.w600 : FontWeight.w500,
+                          color: i == gi
+                              ? const Color(0xFFFFFFFF)
+                              : const Color(0xFF9E9E9E),
+                        ),
                       ),
                     ),
                   ),
@@ -2247,7 +2257,7 @@ class _PageP24SpatialWallpaperPageState
           ),
         if (subs.isNotEmpty)
           SizedBox(
-            height: 58,
+            height: 76,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -3184,11 +3194,13 @@ class _ToolTile extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        width: 74,
+        // ★ 固定 68×68 圆角方块（澎湃的工具块就是这个尺寸与圆角）。
+        //   之前是按内容撑开，块的大小会随文字长短变化，一列看过去参差不齐。
+        width: 68,
+        height: 68,
         margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           color: colors.onSurface.withValues(alpha: selected ? 0.10 : 0.05),
           border: Border.all(
             color: selected ? ring : const Color(0x00000000),
@@ -3197,6 +3209,7 @@ class _ToolTile extends StatelessWidget {
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             MiuixIcon(vector: icon, size: 22, tint: fg),
             const SizedBox(height: 5),
