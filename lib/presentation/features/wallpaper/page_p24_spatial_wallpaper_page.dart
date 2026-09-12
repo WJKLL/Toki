@@ -1024,7 +1024,13 @@ class _PageP24SpatialWallpaperPageState
                                   ),
                                 ),
                                 child: ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: maxPanel),
+                        // ★ 涂刷时把浮层压到 110px —— 只留画笔/橡皮那几个按钮，
+                        //   其余全部让给画布。
+                        //   用户反馈："都挡住画布了，就不能刷的时候隐藏么"：
+                        //   手指落笔的地方正是参数浮层的位置，等于没法下笔。
+                        constraints: BoxConstraints(
+                          maxHeight: _brushMode != 0 ? 110.0 : maxPanel,
+                        ),
                         // ★ 换分类 / 二级 / 三级 / 调试都走同一段过渡：淡入 + 轻微上移。
                         //   之前参数区是"啪"地整块换掉，观感很硬。
                         //   key 里带上三级状态才会真正触发切换动画 ——
