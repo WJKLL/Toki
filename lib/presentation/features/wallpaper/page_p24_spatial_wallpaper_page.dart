@@ -252,6 +252,48 @@ class _PageP24SpatialWallpaperPageState
   ///    形状等周比，脚本见 mode\yolo_work\diagI~diagK）。真正的解法是
   ///    让"有 mask 时背景层仍按深度分层"，而不是让 mask 独占总位移。
   static const double _subjectCoverageMin = 0.15;
+
+  /// 内容类型：**由用户显式指定**走哪条渲染路径。
+  ///
+  /// ★ 为什么必须有这个开关（不是偷懒，是实测结论）
+  ///   自动区分"人像 / 风景"做不到。4 个判据全测过，**全部不可分**：
+  ///     · mask 覆盖率        风景 0 ~ 41.09%   |  人像/二次元 24.08 ~ 49.93%
+  ///     · 连通域(最大块/紧凑度) 41.07% / 1.00   |  35.27% / 0.99
+  ///     · 深度双峰性 η        0.748 ~ 0.839    |  0.744 ~ 0.827
+  ///     · 形状等周比 4πA/P²    0 ~ 0.589        |  0.178 ~ 0.392
+  ///   （脚本 mode\yolo_work\diagI ~ diagK，数字都在，可复核。）
+  ///   根因：modnet / isnet 是【人像抠图】模型 —— 给它一棵树，它也能抠出 41%
+  ///   的"主体"（真机截图：主体层素材里装了一整棵树 + 岩石）。
+  ///   机器判不出来，就把选择权交给用户 —— 这是唯一诚实的做法。
+  ///
+  ///   0 = 自动（按 mask 覆盖率兜底，保留原来的行为）
+  ///   1 = 人物 → 分层：mask 定主体、深度定背景，主体整片刚体移动
+  ///   2 = 风景 → 连续视差：不切层，位移随深度连续变化，不会撕裂
+  int _subjectMode = 0;
+  static const List<String> _subjectModeLabels = <String>['自动', '人物', '风景'];
+
+  /// 是否走【分层】渲染；false = 走连续视差（逐像素）。
+  ///
+  /// 用户显式指定优先；「自动」时才用 mask 覆盖率兜底。
+  bool _useLayerPath(SubjectMask? mask) {
+    switch (_subjectMode) {
+      case 1:
+        // 人物：只要分割拿到了东西就分层（主体层由 mask 界定）
+        return mask != null;
+      case 2:
+        // 风景：一律不切层 —— 连续视差对连续深度才是对的
+        return false;
+      default:
+        return mask != null && mask.coverage >= _subjectCoverageMin;
+    }
+  }
+
+  void _setSubjectMode(int m) {
+    if (m == _subjectMode) return;
+    setState(() => _subjectMode = m);
+    // 已经算过 AI 深度 → 直接重建分层即可，不必重跑推理（省一次 DAV2）。
+    if (_aiDepth) _refreshAiDepthImage();
+  }
   double _gamma = 1.0; // 深度曲线
   double _layers = 4; // 深度分层数（<=1 = 关闭）—— 仅几何模板需要
   double _focusBand = 0.12; // 焦点带宽度：主体整片钉住，向外平滑过渡
@@ -413,11 +455,10 @@ class _PageP24SpatialWallpaperPageState
       final SubjectMask? mask = await _runSegmentation(bytes);
       // ★ 切成图层 —— "分层 + 图层平移"渲染的数据基础
       final ui.Image? photoImg = _photo;
-      // ★ 无主体（风景图 / 分割没抓到人）→ **不切层**，交给逐像素视差渲染。
-      //   原因见 _subjectCoverageMin 的说明：连续深度被等深线切块会撕裂。
-      final bool hasSubject =
-          mask != null && mask.coverage >= _subjectCoverageMin;
-      final DepthLayerSet? set = (photoImg == null || !hasSubject)
+      // ★ 走哪条路：用户显式指定优先（仅"自动"时才用覆盖率兜底）。
+      //   走连续视差时不切层 —— 连续深度被等深线切块会撕裂（见 _subjectMode）。
+      final bool useLayers = _useLayerPath(mask);
+      final DepthLayerSet? set = (photoImg == null || !useLayers)
           ? null
           : await DepthLayerSplitter.split(
               photo: photoImg,
@@ -629,15 +670,21 @@ class _PageP24SpatialWallpaperPageState
     unawaited(() async {
       final DepthResult smoothed = await _refineDepth(r);
       final ui.Image img = await smoothed.toImage();
-      final DepthLayerSet? set = await DepthLayerSplitter.split(
-        photo: photo,
-        depth: smoothed,
-        layerCount: _layerCount,
-        // 复用导入时算好的主体 mask —— 调「主体平滑/分层数」不必重跑分割。
-        subject: _subjectMask,
-        subjectDilate: _layerDelta,
-        editMask: _editMask,
-      );
+      final SubjectMask? sm = _subjectMask;
+      // ★ 与 _runAiDepth 必须用同一条判据 —— 否则切换「内容类型」后看到的
+      //   分层会和首次推理时不一致。
+      final DepthLayerSet? set = !_useLayerPath(sm)
+          ? null
+          : await DepthLayerSplitter.split(
+              photo: photo,
+              depth: smoothed,
+              layerCount: _layerCount,
+              // 复用已算好的主体 mask —— 切「内容类型 / 主体平滑 / 分层数」
+              // 都不必重跑分割。
+              subject: sm,
+              subjectDilate: _layerDelta,
+              editMask: _editMask,
+            );
       if (!mounted) {
         img.dispose();
         set?.dispose();
@@ -1090,6 +1137,32 @@ class _PageP24SpatialWallpaperPageState
                     ? 'AI 推理中…'
                     : (_aiDepth ? 'AI 深度（已启用）' : '用 AI 估计深度'),
               ),
+            ),
+            const SizedBox(height: 6),
+            // ── ★ 内容类型：由用户指定走哪条渲染路径 ──
+            //   自动判据实测不可靠（见 _subjectMode 的说明：4 个判据全不可分），
+            //   所以把选择权交出来：
+            //     人物 → 分层（mask 定主体、深度定背景）
+            //     风景 → 连续视差（不切层，位移随深度连续变化）
+            Row(
+              children: <Widget>[
+                for (int i = 0;
+                    i < _subjectModeLabels.length;
+                    i++) ...<Widget>[
+                  Expanded(
+                    child: MiuixButton(
+                      key: ValueKey<String>('wallpaper.subjectMode.$i'),
+                      onPressed: hasImage ? () => _setSubjectMode(i) : null,
+                      colors: _subjectMode == i
+                          ? MiuixButtonDefaults.buttonColorsPrimary(context)
+                          : null,
+                      child: Text(_subjectModeLabels[i]),
+                    ),
+                  ),
+                  if (i != _subjectModeLabels.length - 1)
+                    const SizedBox(width: 8),
+                ],
+              ],
             ),
             if (_aiInfo.isNotEmpty) ...<Widget>[
               const SizedBox(height: 4),
