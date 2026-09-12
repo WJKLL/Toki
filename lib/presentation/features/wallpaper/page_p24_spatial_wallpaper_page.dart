@@ -975,7 +975,10 @@ class _PageP24SpatialWallpaperPageState
             content: (EdgeInsets padding) {
               // 参数区限高 30% 屏高并就地滚动；画面靠 Expanded 吃掉剩余空间 ——
               // 相册编辑器的比例：画面是主角，参数只是配角。
-              final double maxPanel = MediaQuery.sizeOf(context).height * 0.30;
+              // ★ 参数区限高 24%（原 30%）：三级菜单全开时，底部一共占
+              //   三级 28 + 二级 58 + 一级 52 + 安全区 —— 再给参数区 30% 的话
+              //   画布会被挤到很小（用户反馈："三级菜单打开，编辑画布尺寸过小"）。
+              final double maxPanel = MediaQuery.sizeOf(context).height * 0.24;
               return Material(
                 type: MaterialType.transparency,
                 child: Column(
@@ -1034,6 +1037,12 @@ class _PageP24SpatialWallpaperPageState
     setState(() {
       _historyEntries = list;
       _historyOpen = true;
+      // ★ 一次只开一个面板：开历史就收起工具页/调试/涂刷
+      _toolTab = 0;
+      _subTab = 0;
+      _groupTab = 0;
+      _debugOpen = false;
+      _brushMode = 0;
     });
   }
 
@@ -1308,14 +1317,14 @@ class _PageP24SpatialWallpaperPageState
               );
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
-                // ★ 涂刷模式下才允许缩放：双指缩放/移动画面，单指留给笔刷
-                //   （panEnabled 恒为 false，否则单指一划就把画面拖走了）。
-                //   笔刷坐标不需要手动逆变换 —— GestureDetector 在变换后的
-                //   child 内部，localPosition 本来就是 child 自己的坐标系。
+                // ★ 双指缩放恒开（原实现只在涂刷模式下开 —— 用户反馈
+                //   "画布无法双指放大"）。放大后要能拖动看细节，所以非涂刷
+                //   模式下把 pan 也打开；涂刷模式下仍保持 pan=false，
+                //   把单指留给笔刷（否则一划就把画面拖走、画不上）。
                 child: InteractiveViewer(
                   transformationController: _zoomCtrl,
-                  panEnabled: false,
-                  scaleEnabled: _brushMode > 0,
+                  panEnabled: _brushMode == 0,
+                  scaleEnabled: true,
                   minScale: 1,
                   maxScale: 5,
                   child: GestureDetector(
@@ -1426,21 +1435,21 @@ class _PageP24SpatialWallpaperPageState
                             ),
                           ),
                         ),
-                      // 焦点指示器（不拦截手势）
-                      IgnorePointer(
-                        child: Stack(
-                          children: <Widget>[
-                            Positioned(
-                              left: _focusUv.dx * size.width - 14,
-                              top: _focusUv.dy * size.height - 14,
-                              child: _FocusMarker(
-                                color: colors.primary,
-                                outline: colors.onPrimary,
-                              ),
+                      // 焦点指示器（不拦截手势）。
+                      // ★ 只在「焦点」工具页显示 —— 之前它常驻画面中央，
+                      //   调别的参数时一直杵在那儿很碍眼（用户反馈：
+                      //   "画布的焦点选择器碍眼（不能隐藏）"）。
+                      if (_toolTab == 3)
+                        IgnorePointer(
+                          child: Positioned(
+                            left: _focusUv.dx * size.width - 14,
+                            top: _focusUv.dy * size.height - 14,
+                            child: _FocusMarker(
+                              color: colors.primary,
+                              outline: colors.onPrimary,
                             ),
-                          ],
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -1991,7 +2000,7 @@ class _PageP24SpatialWallpaperPageState
         // ── 三级：文字标签（对齐澎湃的「影调 / 颜色 / 细节」）──
         if (groups != null && groups.length > 1)
           SizedBox(
-            height: 34,
+            height: 28,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
@@ -2021,7 +2030,7 @@ class _PageP24SpatialWallpaperPageState
           ),
         if (subs.isNotEmpty)
           SizedBox(
-            height: 68,
+            height: 58,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2038,7 +2047,7 @@ class _PageP24SpatialWallpaperPageState
             ),
           ),
         SizedBox(
-          height: 60,
+          height: 52,
           child: ListView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2057,6 +2066,9 @@ class _PageP24SpatialWallpaperPageState
                       _subTab = 0; // 换分类时二级回到第一个
                       _groupTab = 0; // 三级同理回到第一组
                     }
+                    // ★ 一次只开一个面板：开工具页就关掉调试与历史
+                    _debugOpen = false;
+                    _historyOpen = false;
                     // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
                     // 用户回去想点画面设焦点会发现点不动。
                     if (_toolTab != 1) _brushMode = 0;
@@ -2067,7 +2079,18 @@ class _PageP24SpatialWallpaperPageState
                 label: '调试',
                 icon: appIcon('info'),
                 selected: _debugOpen,
-                onTap: () => setState(() => _debugOpen = !_debugOpen),
+                // ★ 一次只允许开一个面板：开调试就关掉工具页/历史/涂刷，
+                //   否则两套控件会同时渲染在参数区里，看着就是"菜单重叠"。
+                onTap: () => setState(() {
+                  _debugOpen = !_debugOpen;
+                  if (_debugOpen) {
+                    _toolTab = 0;
+                    _subTab = 0;
+                    _groupTab = 0;
+                    _historyOpen = false;
+                    _brushMode = 0;
+                  }
+                }),
               ),
             ],
           ),
