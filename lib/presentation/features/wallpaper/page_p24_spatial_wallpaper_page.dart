@@ -1469,7 +1469,7 @@ class _PageP24SpatialWallpaperPageState
           // ★ 「视差强度」滑块已移除（v1.53）：穿帮带宽 = 相邻层位移差，位移越大
           //   主体轮廓外露出的错位内容越宽。交给用户调就一定会被调到穿帮的位置，
           //   故改为固定值 _amount，并由 _subjectRatio 保证"主体跟着动、幅度小"。
-          if (_toolTab == 2)
+          if (_toolTab == 2 && _subTab == 1)
             MiuixText(
               '晃动幅度已锁定：层间位移差 ${_layerDelta.round()} px · '
               '主体占背景的 ${(_subjectRatio * 100).round()}%',
@@ -1478,7 +1478,7 @@ class _PageP24SpatialWallpaperPageState
             ),
           // ★ 分层数：2 层最稳（主体 / 背景两块），层数越多纵深层次越细，
           //   但层与层之间的"纸片感"也越明显。仅 AI 深度下有效。
-          if (_toolTab == 2)
+          if (_toolTab == 2 && _subTab == 1)
             MiuixSliderPreference(
               title: '分层数',
             summary: !_aiDepth
@@ -1496,7 +1496,7 @@ class _PageP24SpatialWallpaperPageState
               _refreshAiDepthImage();
             },
           ),
-          if (_toolTab == 3)
+          if (_toolTab == 3 && _subTab == 0)
             MiuixSliderPreference(
               title: '焦点深度',
             summary: '${(_focus * 100).round()}%（点击画面可设定）',
@@ -1512,7 +1512,7 @@ class _PageP24SpatialWallpaperPageState
           // ★ 主体平滑（U-12 保边平滑）：把物体内部深度抹平，同时保住物体
           //   边界的跳变。抹平后**小带宽即可整片钉住主体**，不必把焦点带开大
           //   而牵连到背景。仅在 AI 深度下有意义。
-          if (_toolTab == 2)
+          if (_toolTab == 2 && _subTab == 2)
             MiuixSliderPreference(
               title: '主体平滑',
             summary: !_aiDepth
@@ -1536,6 +1536,7 @@ class _PageP24SpatialWallpaperPageState
           //   既得到"主体不动、背景滑动"的观感，又不会切出硬分割线。
           // ══════════ 3 焦点（几何模板用）══════════
           if (_toolTab == 3) ...<Widget>[
+          if (_subTab == 1)
           _ParamSlider(
             title: '焦点带',
             value: _focusBand,
@@ -1546,6 +1547,7 @@ class _PageP24SpatialWallpaperPageState
                 : '±${(_focusBand * 100).round()}%',
             onChanged: (double v) => setState(() => _focusBand = v),
           ),
+          if (_subTab == 2)
           MiuixSliderPreference(
             title: '深度分层',
             summary: _aiDepth
@@ -1560,6 +1562,7 @@ class _PageP24SpatialWallpaperPageState
             insideMargin: _itemMargin,
             onValueChange: (double v) => setState(() => _layers = v),
           ),
+          if (_subTab == 3)
           _ParamSlider(
             title: '深度曲线',
             value: _gamma,
@@ -1569,8 +1572,8 @@ class _PageP24SpatialWallpaperPageState
           ),
           ], // ══════════ /3 焦点 ══════════
 
-          // ══════════ 2 空间（续）══════════
-          if (_toolTab == 2) ...<Widget>[
+          // ══════════ 2 空间 · 二级 0「晃动来源」══════════
+          if (_toolTab == 2 && _subTab == 0) ...<Widget>[
             // ── ★ 晃动来源（S-41）：自动 / 手机传感器 / 摇杆 ──
             MiuixText(
               '晃动来源',
@@ -1836,10 +1839,8 @@ class _PageP24SpatialWallpaperPageState
 
   /// 二级子工具：(标签, 图标名)，按一级分类索引。
   ///
-  /// ★ 目前只有「主体」真正分成两段（深度来源 / 涂抹修正）—— 它的控件本来
-  ///   就分成了两组，切开是干净的。其余分类的参数还没细分到"一段一个子工具"，
-  ///   所以先各给一条当段落标题。
-  ///   **不做假的二级**：点上去没反应的按钮比没有更糟。
+  /// **每条对应参数面板里的一段**，选中哪条就只显示哪一段 —— 这才是两级菜单
+  /// 的意义：参数多到一屏放不下时，找参数从"翻列表"变成"点图标"。
   static const Map<int, List<(String, String)>> _subTools =
       <int, List<(String, String)>>{
     1: <(String, String)>[
@@ -1847,10 +1848,15 @@ class _PageP24SpatialWallpaperPageState
       ('涂抹修正', 'edit'),
     ],
     2: <(String, String)>[
-      ('晃动与视差', 'play'),
+      ('晃动来源', 'play'),
+      ('视差分层', 'gridView'),
+      ('主体平滑', 'layers'),
     ],
     3: <(String, String)>[
-      ('焦点与深度', 'tune'),
+      ('焦点深度', 'tune'),
+      ('焦点带', 'layers'),
+      ('深度分层', 'gridView'),
+      ('深度曲线', 'tune'),
     ],
     4: <(String, String)>[
       ('组件', 'add'),
