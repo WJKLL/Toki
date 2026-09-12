@@ -270,6 +270,12 @@ class SpatialComponent {
       u: u,
       v: v,
       scale: scale,
+      // ★ 时钟也默认【无外壳】—— 玻璃/折射应当作用在【数字本身】，
+      //   而不是给数字垫一个方块。之前只有文字/图案设了 glass=0，
+      //   时钟漏了，所以它一直带着一个方框
+      //   （用户反馈："时钟组件一直有，不管选中没选中"）。
+      //   想要"时钟卡片"那种观感，在样式面板里把外壳滑条拉起来即可。
+      glass: 0,
       props: const <String, Object?>{
         'h24': true,
         'showDate': true,

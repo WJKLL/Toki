@@ -2512,6 +2512,17 @@ class _PageP24SpatialWallpaperPageState
             _updateSelected((SpatialComponent x) => x.copyWith(depth: v)),
       ),
       _MiSlider(
+        title: '组件外壳',
+        summary: c.glass <= 0.001
+            ? '关闭 —— 只有内容本身（玻璃/折射作用在字与图案上）'
+            : '${(c.glass * 100).round()}%（玻璃底 + 高光边）',
+        value: c.glass,
+        min: 0,
+        max: 1,
+        onValueChange: (double v) =>
+            _updateSelected((SpatialComponent x) => x.copyWith(glass: v)),
+      ),
+      _MiSlider(
         title: '视差系数',
         summary: c.parallax.abs() < 0.005
             ? '0 —— 完全固定（时钟不随晃动移动）'

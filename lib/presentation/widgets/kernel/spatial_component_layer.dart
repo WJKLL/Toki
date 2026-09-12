@@ -186,18 +186,24 @@ class SpatialComponentLayer extends StatelessWidget {
   Widget _shell(SpatialComponent c, bool selected, Widget child) {
     final double g = c.glass.clamp(0.0, 1.0);
 
-    // ── 无外壳：内容直接呈现，选中时只叠一圈细描边 ──
+    // ── 无外壳：内容直接呈现，选中时只画【四个角】 ──
     if (g <= 0.001) {
       if (!selected) return child;
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(c.corner),
-          border: Border.all(
-            color: const Color(0xFFFFFFFF).withValues(alpha: 0.75),
-            width: 1.4,
+      // ★ 选中提示只画四个角，**不画整圈矩形**。
+      //   上一版画的是整圈描边 —— 而添加组件时会自动选中，于是用户第一眼
+      //   看到的就是"组件外面套了个方框"（反馈："目前组件还是有方框"）。
+      //   四角是设计工具的通行做法：既看得清选中范围，又不会被误认为
+      //   组件自身的一部分、更不会在导出图里变成一道描边。
+      return Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          child,
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _CornerPainter()),
+            ),
           ),
-        ),
-        child: child,
+        ],
       );
     }
 
@@ -228,4 +234,58 @@ class SpatialComponentLayer extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// 选中提示：只画四个角（每条 L 形两笔）。
+///
+/// ★ 为什么不画整圈：整圈描边会被当成组件自身的一部分（用户第一反应就是
+///   "组件有个方框"）；四角只在视觉上圈定范围，不会被误读。
+class _CornerPainter extends CustomPainter {
+  const _CornerPainter();
+
+  /// 每个角的臂长（逻辑像素）。
+  static const double _arm = 14;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint p = Paint()
+      ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.9)
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    // 深色图上也看得见：先描一层黑再描白
+    final Paint shadow = Paint()
+      ..color = const Color(0x66000000)
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final double w = size.width;
+    final double h = size.height;
+    const double a = _arm;
+
+    final Path path = Path()
+      // 左上
+      ..moveTo(0, a)
+      ..lineTo(0, 0)
+      ..lineTo(a, 0)
+      // 右上
+      ..moveTo(w - a, 0)
+      ..lineTo(w, 0)
+      ..lineTo(w, a)
+      // 右下
+      ..moveTo(w, h - a)
+      ..lineTo(w, h)
+      ..lineTo(w - a, h)
+      // 左下
+      ..moveTo(a, h)
+      ..lineTo(0, h)
+      ..lineTo(0, h - a);
+
+    canvas.drawPath(path, shadow);
+    canvas.drawPath(path, p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CornerPainter old) => false;
 }
