@@ -335,6 +335,29 @@ class _PageP24SpatialWallpaperPageState
   ///   内容类型 / 手动涂刷 三组），全平铺出来只能靠滚动翻找。
   ///   分成两级之后"一屏只显示一件事"，找参数从"翻列表"变成"点图标"。
   int _subTab = 0;
+
+  /// 三级菜单：文字标签，把当前分类的二级工具再**分一次组**。
+  ///
+  /// ★ 对齐澎湃那一行「影调 / 颜色 / 细节」—— 位置在滑卡之下、工具块之上，
+  ///   选一组就只显示那一组的工具。分类里工具本来就少时不显示（见 _subGroups）。
+  int _groupTab = 0;
+
+  /// 一级分类 → (组名, 该组包含的二级索引)。没有条目的分类不显示三级行。
+  static const Map<int, List<(String, List<int>)>> _subGroups =
+      <int, List<(String, List<int>)>>{
+    1: <(String, List<int>)>[
+      ('深度', <int>[0]),
+      ('修正', <int>[1]),
+    ],
+    2: <(String, List<int>)>[
+      ('来源', <int>[0]),
+      ('视差', <int>[1, 2]),
+    ],
+    3: <(String, List<int>)>[
+      ('焦点', <int>[0, 1]),
+      ('深度', <int>[2, 3]),
+    ],
+  };
   bool _busy = false;
 
   // ── 组件（S-38 / C-67 · PLAN_components_v1.53.md 期 1）──────────
@@ -1873,9 +1896,46 @@ class _PageP24SpatialWallpaperPageState
   Widget _buildToolBar(MiuixColors colors) {
     final List<(String, String)> subs =
         _subTools[_toolTab] ?? const <(String, String)>[];
+    // 三级分组：分类定义了分组就只显示当前组的二级工具，否则全显示。
+    final List<(String, List<int>)>? groups = _subGroups[_toolTab];
+    final int gi = groups == null ? 0 : _groupTab.clamp(0, groups.length - 1);
+    final List<int> visible = groups == null
+        ? List<int>.generate(subs.length, (int i) => i, growable: false)
+        : groups[gi].$2;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        // ── 三级：文字标签（对齐澎湃的「影调 / 颜色 / 细节」）──
+        if (groups != null && groups.length > 1)
+          SizedBox(
+            height: 34,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                for (int i = 0; i < groups.length; i++)
+                  GestureDetector(
+                    key: ValueKey<String>('wallpaper.group.$i'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() {
+                      _groupTab = i;
+                      // 换组时二级回到该组第一条 —— 否则 _subTab 会指到别的组去，
+                      // 参数区显示的东西和选中的工具块对不上。
+                      _subTab = groups[i].$2.first;
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: MiuixText(
+                        groups[i].$1,
+                        style: MiuixTheme.of(context).textStyles.body1,
+                        color: i == gi
+                            ? colors.onSurface
+                            : colors.onSurfaceVariantSummary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         if (subs.isNotEmpty)
           SizedBox(
             height: 68,
@@ -1883,7 +1943,7 @@ class _PageP24SpatialWallpaperPageState
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: <Widget>[
-                for (int i = 0; i < subs.length; i++)
+                for (final int i in visible)
                   _ToolTile(
                     key: ValueKey<String>('wallpaper.sub.$i'),
                     label: subs[i].$1,
@@ -1912,6 +1972,7 @@ class _PageP24SpatialWallpaperPageState
                     } else {
                       _toolTab = id;
                       _subTab = 0; // 换分类时二级回到第一个
+                      _groupTab = 0; // 三级同理回到第一组
                     }
                     // 离开「主体」页时顺手退出涂刷 —— 否则手势还留在笔刷上，
                     // 用户回去想点画面设焦点会发现点不动。
