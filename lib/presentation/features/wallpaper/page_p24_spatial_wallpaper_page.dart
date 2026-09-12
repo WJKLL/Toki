@@ -49,6 +49,9 @@ import '../../widgets/c26_more_menu.dart';
 import '../../widgets/kernel/layered_parallax_view.dart';
 import '../../widgets/kernel/parallax_view.dart';
 import '../../widgets/kernel/spatial_component_layer.dart';
+// v2.1.0 项目整理：UI 原语（滑条 / 开关 / 按钮 / 摇杆 / 历史卡 …）已提取到
+//   同目录的独立文件 C-71，它们与 State 零耦合。此处只留状态、业务逻辑与骨架。
+import 'spatial_ui_kit.dart';
 
 class PageP24SpatialWallpaperPage extends ConsumerStatefulWidget {
   const PageP24SpatialWallpaperPage({super.key});
@@ -325,10 +328,19 @@ class _PageP24SpatialWallpaperPageState
   int _inputMode = 0;
   static const List<String> _inputModeLabels = <String>['自动', '传感器', '摇杆'];
 
-  /// 传感器 / 摇杆给出的归一化倾斜量（-1..1）。三者统一在 _currentShift() 汇合。
+  /// 传感器 / 摇杆给出的归一化倾斜量（-1..1）。三者统一在 _computeShift() 汇合。
   Offset _sensorShift = Offset.zero;
   Offset _joystickShift = Offset.zero;
   StreamSubscription<Offset>? _tiltSub;
+
+  /// 画面位移的【唯一发布点】（v2.1.0 效率改造）。
+  ///
+  /// ★ 为什么要单独拎出来：传感器约 50 Hz、自动晃动 60 fps 持续产出位移，
+  ///   以前每一次都走 setState → **整页重建**，把顶部栏、三级工具栏、五百多行
+  ///   的参数面板一起重盖一遍，而它们跟位移毫无关系。改成 ValueNotifier 之后，
+  ///   高频位移只重建「画面」这一棵子树，面板一次都不重建。
+  ///   （摇杆仍是手动拖动、低频，保留 setState 以便摇杆自身回显。）
+  final ValueNotifier<Offset> _shiftN = ValueNotifier<Offset>(Offset.zero);
 
   /// 二级子工具的选中项（对齐澎湃编辑器的两级菜单）。
   ///
@@ -443,6 +455,8 @@ class _PageP24SpatialWallpaperPageState
       vsync: this,
       duration: const Duration(milliseconds: 4200),
     );
+    // 位移的产出源之一：每帧把当前方向发布给画面（见 _shiftN 的说明）。
+    _ticker.addListener(_publishShift);
     if (_autoWobble) _ticker.repeat();
   }
 
@@ -452,6 +466,7 @@ class _PageP24SpatialWallpaperPageState
     unawaited(_tiltSub?.cancel() ?? Future<void>.value());
     _tiltSub = null;
     _ticker.dispose();
+    _shiftN.dispose();
     _zoomCtrl.dispose();
     // 统一释放。以前这里只 dispose 了这 4 个 ui.Image，而深度结果 / 主体 mask /
     // 撤销栈会一直挂到进程结束 —— 那也是"越编辑越占内存"的一部分。
@@ -473,8 +488,8 @@ class _PageP24SpatialWallpaperPageState
   // 三者统一输出【归一化方向】(-1..1)，幅度仍由 uAmount（像素）承担 ——
   // 这样三种来源的观感尺度一致，切到真机倾斜也不会突然变猛。
 
-  /// 当前生效的晃动方向。所有渲染路径都从这里取值。
-  Offset _currentShift() {
+  /// 当前生效的晃动方向（纯计算，本身不产生任何重建）。
+  Offset _computeShift() {
     switch (_inputMode) {
       case 1:
         return _sensorShift;
@@ -485,9 +500,22 @@ class _PageP24SpatialWallpaperPageState
     }
   }
 
+  /// 把当前方向发布给画面 —— **位移唯一允许触发重建的入口**。
+  ///
+  /// ★ 高频源（自动晃动每帧 60 fps、传感器约 50 Hz）只走这里，不走 setState：
+  ///   它们不需要顶部栏与参数面板跟着重盖。若某帧算出的方向与上一帧相同，
+  ///   ValueNotifier 自己跳过通知 —— 静止时（关掉自动晃动 / 摇杆回正 /
+  ///   手机平放）连画面子树都不重建。
+  void _publishShift() {
+    if (!mounted) return;
+    _shiftN.value = _computeShift();
+  }
+
   void _setInputMode(int m) {
     if (m == _inputMode) return;
     setState(() => _inputMode = m);
+    // 换了来源要立刻让画面跟上，否则会停在上一档的最后一帧。
+    _publishShift();
     if (m == 1) {
       unawaited(_startSensor());
     } else {
@@ -515,7 +543,11 @@ class _PageP24SpatialWallpaperPageState
     // 一进来就校准零位 —— 每个人握手机的姿势不同，不校准画面一上来就是偏的。
     src.recalibrate();
     _tiltSub = src.stream.listen((Offset v) {
-      if (mounted) setState(() => _sensorShift = v);
+      if (!mounted) return;
+      _sensorShift = v;
+      // ★ 不 setState：传感器每秒五十次全页重建是这里最大的一笔浪费，
+      //   而位移只影响画面，直接发布即可。
+      if (_inputMode == 1) _shiftN.value = v;
     });
   }
 
@@ -532,6 +564,7 @@ class _PageP24SpatialWallpaperPageState
       _aiInfo = '$why —— 已回到自动晃动';
     });
     if (_autoWobble) _ticker.repeat();
+    _publishShift();
   }
 
   /// 把手机摆到舒服的位置再点 —— 以当前姿态为新的零位。
@@ -923,6 +956,8 @@ class _PageP24SpatialWallpaperPageState
     } else {
       _ticker.stop();
     }
+    // 关掉时立刻归零（否则画面会僵在停住那一刻的偏移上），打开时立刻起步。
+    _publishShift();
   }
 
   // ── 组件（S-38）─────────────────────────────────────────
@@ -1276,7 +1311,7 @@ class _PageP24SpatialWallpaperPageState
                       const SizedBox(height: 8),
                   itemBuilder: (BuildContext c, int i) {
                     final WallpaperHistoryEntry e = list[i];
-                    return _HistoryTile(
+                    return SpatialHistoryTile(
                       key: ValueKey<String>('wallpaper.history.${e.id}'),
                       entry: e,
                       timeText: _fmtTime(e.savedAt),
@@ -1370,20 +1405,20 @@ class _PageP24SpatialWallpaperPageState
       largeTitle: '空间图片',
       navigationIcon: _backButton,
       actions: <Widget>[
-        _RoundIconButton(
+        SpatialRoundIconButton(
           key: const ValueKey<String>('wallpaper.undo'),
           icon: appIcon('undo'),
           tooltip: '撤销',
           // 无可撤销笔迹时置灰（onTap 为 null）
           onTap: _undoStack.isEmpty ? null : _undoBrush,
         ),
-        _RoundIconButton(
+        SpatialRoundIconButton(
           key: const ValueKey<String>('wallpaper.pickTop'),
           icon: appIcon('image'),
           tooltip: '导入图片',
           onTap: () => unawaited(_pickPhoto()),
         ),
-        _RoundIconButton(
+        SpatialRoundIconButton(
           key: const ValueKey<String>('wallpaper.compare'),
           icon: appIcon('image'),
           tooltip: '对比原图',
@@ -1391,14 +1426,14 @@ class _PageP24SpatialWallpaperPageState
               ? null
               : () => setState(() => _showOriginal = !_showOriginal),
         ),
-        _RoundIconButton(
+        SpatialRoundIconButton(
           key: const ValueKey<String>('wallpaper.history'),
           icon: appIcon('tasks'),
           tooltip: '编辑历史',
           onTap: () => unawaited(_openHistory()),
         ),
         // 澎湃那套：保存是独立的胶囊按钮，不是图标 —— 它是这一屏的主操作。
-        _SavePill(
+        SpatialSavePill(
           key: const ValueKey<String>('wallpaper.save'),
           onTap:
               _photo == null || _busy ? null : () => unawaited(_saveToGallery()),
@@ -1503,10 +1538,14 @@ class _PageP24SpatialWallpaperPageState
                   child: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
-                      AnimatedBuilder(
-                        animation: _ticker,
-                        builder: (BuildContext context, Widget? _) {
-                          final Offset shift = _currentShift();
+                      // ★ v2.1.0：改听 _shiftN，而不是直接听 _ticker ——
+                      //   位移的三个来源（自动 / 传感器 / 摇杆）都汇进这个
+                      //   notifier，画面因此对三者一视同仁；传感器那种高频更新
+                      //   也不再需要 setState 把整页重盖一遍。
+                      ValueListenableBuilder<Offset>(
+                        valueListenable: _shiftN,
+                        builder:
+                            (BuildContext context, Offset shift, Widget? _) {
                           // 有分层结果 → 「分层 + 图层平移」：层内刚体平移、
                           // 近层移开由下层内容填补 → **没有遮挡空洞/拖影**。
                           // 深度图预览时仍走 shader（要看深度本身）。
@@ -1576,7 +1615,7 @@ class _PageP24SpatialWallpaperPageState
                       // 放在最后 = 盖在其它预览之上。
                       if (_showLayer > 0 && _layerSet != null)
                         IgnorePointer(
-                          child: _LayerMaterialView(
+                          child: SpatialLayerMaterialView(
                             layerSet: _layerSet!,
                             index: _showLayer - 1,
                           ),
@@ -1586,7 +1625,7 @@ class _PageP24SpatialWallpaperPageState
                       if (_brushTrail.isNotEmpty)
                         IgnorePointer(
                           child: CustomPaint(
-                            painter: _BrushTrailPainter(
+                            painter: SpatialBrushTrailPainter(
                               trail: _brushTrail,
                               radius: _activeBrushSize,
                               erase: _brushMode == 2,
@@ -1602,7 +1641,7 @@ class _PageP24SpatialWallpaperPageState
                           child: Positioned(
                             left: _focusUv.dx * size.width - 14,
                             top: _focusUv.dy * size.height - 14,
-                            child: _FocusMarker(
+                            child: SpatialFocusMarker(
                               color: colors.primary,
                               outline: colors.onPrimary,
                             ),
@@ -1638,7 +1677,7 @@ class _PageP24SpatialWallpaperPageState
             color: colors.onSurfaceVariantSummary,
           ),
           const SizedBox(height: 16),
-          _MiButton(
+          SpatialMiButton(
             key: const ValueKey<String>('wallpaper.pick'),
             onPressed: _busy ? null : _pickPhoto,
             colors: MiuixButtonDefaults.buttonColorsPrimary(context),
@@ -1671,7 +1710,7 @@ class _PageP24SpatialWallpaperPageState
                     i < DepthTemplate.presets.length;
                     i++) ...<Widget>[
                   Expanded(
-                    child: _MiButton(
+                    child: SpatialMiButton(
                       key: ValueKey<String>(
                         'wallpaper.tpl.${DepthTemplate.presets[i].kind.name}',
                       ),
@@ -1691,7 +1730,7 @@ class _PageP24SpatialWallpaperPageState
             ),
             const SizedBox(height: 6),
             // ── S-31：端侧 AI 深度估计（真实场景层次）──
-            _MiButton(
+            SpatialMiButton(
               key: const ValueKey<String>('wallpaper.ai'),
               onPressed: (!hasImage || _aiBusy) ? null : _runAiDepth,
               colors: _aiDepth
@@ -1715,7 +1754,7 @@ class _PageP24SpatialWallpaperPageState
                     i < _subjectModeLabels.length;
                     i++) ...<Widget>[
                   Expanded(
-                    child: _MiButton(
+                    child: SpatialMiButton(
                       key: ValueKey<String>('wallpaper.subjectMode.$i'),
                       onPressed: hasImage ? () => _setSubjectMode(i) : null,
                       colors: _subjectMode == i
@@ -1752,7 +1791,7 @@ class _PageP24SpatialWallpaperPageState
           // ★ 分层数：2 层最稳（主体 / 背景两块），层数越多纵深层次越细，
           //   但层与层之间的"纸片感"也越明显。仅 AI 深度下有效。
           if (_toolTab == 2 && _subTab == 1)
-            _MiSlider(
+            SpatialMiSlider(
               title: '分层数',
             summary: !_aiDepth
                 ? '（需先运行 AI 深度）'
@@ -1770,7 +1809,7 @@ class _PageP24SpatialWallpaperPageState
             },
           ),
           if (_toolTab == 3 && _subTab == 0)
-            _MiSlider(
+            SpatialMiSlider(
               title: '焦点深度',
             summary: '${(_focus * 100).round()}%（点击画面可设定）',
             value: _focus,
@@ -1786,7 +1825,7 @@ class _PageP24SpatialWallpaperPageState
           //   边界的跳变。抹平后**小带宽即可整片钉住主体**，不必把焦点带开大
           //   而牵连到背景。仅在 AI 深度下有意义。
           if (_toolTab == 2 && _subTab == 2)
-            _MiSlider(
+            SpatialMiSlider(
               title: '主体平滑',
             summary: !_aiDepth
                 ? '（仅 AI 深度生效）'
@@ -1810,7 +1849,7 @@ class _PageP24SpatialWallpaperPageState
           // ══════════ 3 焦点（几何模板用）══════════
           if (_toolTab == 3) ...<Widget>[
           if (_subTab == 1)
-          _ParamSlider(
+          SpatialParamSlider(
             title: '焦点带',
             value: _focusBand,
             min: 0,
@@ -1821,7 +1860,7 @@ class _PageP24SpatialWallpaperPageState
             onChanged: (double v) => setState(() => _focusBand = v),
           ),
           if (_subTab == 2)
-          _MiSlider(
+          SpatialMiSlider(
             title: '深度分层',
             summary: _aiDepth
                 ? 'AI 深度下已锁定关闭（分层只适合几何模板）'
@@ -1836,7 +1875,7 @@ class _PageP24SpatialWallpaperPageState
             onValueChange: (double v) => setState(() => _layers = v),
           ),
           if (_subTab == 3)
-          _ParamSlider(
+          SpatialParamSlider(
             title: '深度曲线',
             value: _gamma,
             min: 0.5,
@@ -1850,7 +1889,7 @@ class _PageP24SpatialWallpaperPageState
             // ── ★ 画布视图：缩放 + 移动中心 ──
             //   为什么不做成纯手势：双指缩放在涂刷模式下会被笔刷的 pan 抢走，
             //   而涂刷正是最需要放大的场景。显式控件任何模式下都能用。
-            _MiSlider(
+            SpatialMiSlider(
               title: '画布缩放',
               summary: '${_viewScale.toStringAsFixed(2)}×',
               value: _viewScale,
@@ -1868,7 +1907,7 @@ class _PageP24SpatialWallpaperPageState
               color: colors.onSurfaceVariantSummary,
             ),
             const SizedBox(height: 6),
-            _JoystickPad(
+            SpatialJoystickPad(
               value: Offset(
                 (_viewCenter.dx - 0.5) * 2,
                 (_viewCenter.dy - 0.5) * 2,
@@ -1885,7 +1924,7 @@ class _PageP24SpatialWallpaperPageState
             ),
             const SizedBox(height: 6),
             Center(
-              child: _MiButton(
+              child: SpatialMiButton(
                 key: const ValueKey<String>('wallpaper.view.reset'),
                 onPressed: () {
                   setState(() {
@@ -1909,7 +1948,7 @@ class _PageP24SpatialWallpaperPageState
               children: <Widget>[
                 for (int i = 0; i < _inputModeLabels.length; i++) ...<Widget>[
                   Expanded(
-                    child: _MiButton(
+                    child: SpatialMiButton(
                       key: ValueKey<String>('wallpaper.input.$i'),
                       onPressed: () => _setInputMode(i),
                       colors: _inputMode == i
@@ -1926,7 +1965,7 @@ class _PageP24SpatialWallpaperPageState
             // 传感器：每个人握姿不同，随时可以重设零位
             if (_inputMode == 1) ...<Widget>[
               const SizedBox(height: 6),
-              _MiButton(
+              SpatialMiButton(
                 key: const ValueKey<String>('wallpaper.tilt.calib'),
                 onPressed: _recalibrateTilt,
                 child: const Text('把当前姿态设为零位'),
@@ -1941,23 +1980,30 @@ class _PageP24SpatialWallpaperPageState
             // 摇杆：拖着控制方向，松手不回正（便于定住某个角度慢慢看）
             if (_inputMode == 2) ...<Widget>[
               const SizedBox(height: 8),
-              _JoystickPad(
+              SpatialJoystickPad(
                 value: _joystickShift,
-                onChanged: (Offset v) => setState(() => _joystickShift = v),
+                onChanged: (Offset v) {
+                  // setState 是为了让摇杆自身回显（它的 value 就取这个字段）；
+                  // _shiftN 是为了让画面跟上 —— 两者缺一不可。
+                  setState(() => _joystickShift = v);
+                  if (_inputMode == 2) _shiftN.value = v;
+                },
               ),
               const SizedBox(height: 6),
               Center(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.joystick.center'),
-                  onPressed: () =>
-                      setState(() => _joystickShift = Offset.zero),
+                  onPressed: () {
+                    setState(() => _joystickShift = Offset.zero);
+                    if (_inputMode == 2) _shiftN.value = Offset.zero;
+                  },
                   child: const Text('回正'),
                 ),
               ),
             ],
             // 自动：保留原开关（关掉 = 完全静止，便于和另外两档对比）
             if (_inputMode == 0)
-              _MiSwitch(
+              SpatialMiSwitch(
                 title: '自动晃动',
                 summary: '用正弦轨迹模拟陀螺仪输入（关掉则完全静止，便于比对）',
                 value: _autoWobble,
@@ -1969,14 +2015,14 @@ class _PageP24SpatialWallpaperPageState
           // 这四个是开发工具：深度图预览走的是另一条渲染路径，只有层素材预览
           // 才反映实际参与合成的东西。收进这里，不占主面板。
           if (_debugOpen) ...<Widget>[
-          _MiSwitch(
+          SpatialMiSwitch(
             title: '深度图预览',
             summary: '显示深度图而非成片（调试）',
             value: _showDepth,
             onChanged: (bool v) => setState(() => _showDepth = v),
             insideMargin: _itemMargin,
           ),
-          _MiSwitch(
+          SpatialMiSwitch(
             title: '主体遮罩预览',
             summary: _subjectMask == null
                 ? '（需先点「用 AI 估计深度」）'
@@ -1987,7 +2033,7 @@ class _PageP24SpatialWallpaperPageState
           ),
           // ★ 层素材预览：这两个才反映【实际参与渲染的东西】。
           //   深度图预览走的是另一条路径，它对了不代表渲染就对。
-          _MiSwitch(
+          SpatialMiSwitch(
             title: '背景层素材',
             summary: _layerSet == null
                 ? '（需先点「用 AI 估计深度」）'
@@ -1996,7 +2042,7 @@ class _PageP24SpatialWallpaperPageState
             onChanged: (bool v) => setState(() => _showLayer = v ? 1 : 0),
             insideMargin: _itemMargin,
           ),
-          _MiSwitch(
+          SpatialMiSwitch(
             title: '主体层素材',
             summary: _layerSet == null
                 ? '（需先点「用 AI 估计深度」）'
@@ -2031,7 +2077,7 @@ class _PageP24SpatialWallpaperPageState
               children: <Widget>[
                 for (int i = 0; i < _layerCount; i++) ...<Widget>[
                   Expanded(
-                    child: _MiButton(
+                    child: SpatialMiButton(
                       key: ValueKey<String>('wallpaper.brushLayer.$i'),
                       onPressed: () => setState(() {
                         final SubjectMask? m = _subjectMask;
@@ -2054,7 +2100,7 @@ class _PageP24SpatialWallpaperPageState
           Row(
             children: <Widget>[
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.brush.paint'),
                   onPressed:
                       _subjectMask == null ? null : () => _setBrushMode(1),
@@ -2066,7 +2112,7 @@ class _PageP24SpatialWallpaperPageState
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.brush.erase'),
                   onPressed:
                       _subjectMask == null ? null : () => _setBrushMode(2),
@@ -2079,7 +2125,7 @@ class _PageP24SpatialWallpaperPageState
             ],
           ),
           if (_brushMode > 0) ...<Widget>[
-            _MiSlider(
+            SpatialMiSlider(
               title: _brushMode == 2 ? '橡皮大小' : '笔刷大小',
               summary: '${(_activeBrushSize * 100).round()}% 画面短边'
                   '（${_brushMode == 2 ? "擦除" : "涂抹"}中，松手生效）',
@@ -2099,7 +2145,7 @@ class _PageP24SpatialWallpaperPageState
             Row(
               children: <Widget>[
                 Expanded(
-                  child: _MiButton(
+                  child: SpatialMiButton(
                     key: const ValueKey<String>('wallpaper.brush.undo'),
                     onPressed: _undoStack.isEmpty ? null : _undoBrush,
                     child: Text('撤销（${_undoStack.length}）'),
@@ -2107,7 +2153,7 @@ class _PageP24SpatialWallpaperPageState
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _MiButton(
+                  child: SpatialMiButton(
                     key: const ValueKey<String>('wallpaper.brush.reset'),
                     onPressed: _resetZoom,
                     child: const Text('复位视图'),
@@ -2122,7 +2168,7 @@ class _PageP24SpatialWallpaperPageState
             ),
           ],
           if (_brushMode == 0 && _editMask != null && !_editMask!.isEmpty)
-            _MiButton(
+            SpatialMiButton(
               key: const ValueKey<String>('wallpaper.brush.clear'),
               onPressed: _clearBrush,
               child: const Text('清除手动修改'),
@@ -2140,7 +2186,7 @@ class _PageP24SpatialWallpaperPageState
           Row(
             children: <Widget>[
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.comp.add'),
                   onPressed: hasImage ? _addClock : null,
                   child: const Text('时钟'),
@@ -2148,7 +2194,7 @@ class _PageP24SpatialWallpaperPageState
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.comp.text'),
                   onPressed: hasImage ? _addText : null,
                   child: const Text('艺术字'),
@@ -2160,7 +2206,7 @@ class _PageP24SpatialWallpaperPageState
           Row(
             children: <Widget>[
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.comp.sticker'),
                   onPressed:
                       hasImage ? () => unawaited(_pickSticker()) : null,
@@ -2169,7 +2215,7 @@ class _PageP24SpatialWallpaperPageState
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: const ValueKey<String>('wallpaper.comp.del'),
                   onPressed: hasImage && _selected != null
                       ? _removeSelected
@@ -2185,7 +2231,7 @@ class _PageP24SpatialWallpaperPageState
 
           // ══════════ 5 导出 ══════════
           if (_toolTab == 5) ...<Widget>[
-          _MiButton(
+          SpatialMiButton(
             key: const ValueKey<String>('wallpaper.save.panel'),
             onPressed: (hasImage && !_busy)
                 ? () => unawaited(_saveToGallery())
@@ -2343,7 +2389,7 @@ class _PageP24SpatialWallpaperPageState
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: <Widget>[
                 for (final int i in visible)
-                  _ToolTile(
+                  SpatialToolTile(
                     key: ValueKey<String>('wallpaper.sub.$i'),
                     label: subs[i].$1,
                     icon: appIcon(subs[i].$2),
@@ -2360,7 +2406,7 @@ class _PageP24SpatialWallpaperPageState
             padding: const EdgeInsets.symmetric(horizontal: 8),
             children: <Widget>[
               for (final (int id, String label, String icon) in _categories)
-                _CategoryPill(
+                SpatialCategoryPill(
                   key: ValueKey<String>('wallpaper.tab.$id'),
                   label: label,
                   icon: appIcon(icon),
@@ -2381,7 +2427,7 @@ class _PageP24SpatialWallpaperPageState
                     if (_toolTab != 1) _brushMode = 0;
                   }),
                 ),
-              _CategoryPill(
+              SpatialCategoryPill(
                 key: const ValueKey<String>('wallpaper.tab.debug'),
                 label: '调试',
                 icon: appIcon('info'),
@@ -2423,7 +2469,7 @@ class _PageP24SpatialWallpaperPageState
                         MiuixIcon(
                           vector: MiuixIcons.basic.check,
                           size: 22,
-                          tint: _MiAccent.fill,
+                          tint: SpatialMiAccent.fill,
                         ),
                         const SizedBox(height: 4),
                         const Text(
@@ -2551,7 +2597,7 @@ class _PageP24SpatialWallpaperPageState
           children: <Widget>[
             for (int i = 0; i < SpatialStylePresets.all.length; i++) ...<Widget>[
               Expanded(
-                child: _MiButton(
+                child: SpatialMiButton(
                   key: ValueKey<String>('wallpaper.style.$i'),
                   onPressed: () => _updateSelected(
                     (SpatialComponent x) => x.copyWith(
@@ -2570,7 +2616,7 @@ class _PageP24SpatialWallpaperPageState
           ],
         ),
         const SizedBox(height: 6),
-        _MiSlider(
+        SpatialMiSlider(
           title: '字号',
           summary: c.style.fontSize.round().toString(),
           value: c.style.fontSize,
@@ -2580,7 +2626,7 @@ class _PageP24SpatialWallpaperPageState
             (SpatialComponent x) => x.copyWith(style: x.style.copyWith(fontSize: v)),
           ),
         ),
-        _MiSlider(
+        SpatialMiSlider(
           title: '描边宽度',
           summary: c.style.strokeWidth <= 0.01
               ? '关闭'
@@ -2593,7 +2639,7 @@ class _PageP24SpatialWallpaperPageState
                 x.copyWith(style: x.style.copyWith(strokeWidth: v)),
           ),
         ),
-        _MiSlider(
+        SpatialMiSlider(
           title: '外发光',
           summary: c.style.glowRadius <= 0.01
               ? '关闭'
@@ -2607,7 +2653,7 @@ class _PageP24SpatialWallpaperPageState
           ),
         ),
         // ★ 竖排：逐字换行（不是旋转整块）
-        _MiSwitch(
+        SpatialMiSwitch(
           title: '竖排',
           summary: '中文题字用，标点保持正立',
           value: c.boolProp('vertical'),
@@ -2620,7 +2666,7 @@ class _PageP24SpatialWallpaperPageState
       ],
       // ★ Z 与视差【解耦】：Z 决定前后关系（期 6 起同时决定遮挡），
       //   视差系数决定动不动。默认 Z 最前 + 视差 0 = 盖在最上层但完全固定。
-      _MiSlider(
+      SpatialMiSlider(
         title: '组件深度 Z',
         summary: '${(c.depth * 100).round()}%（1 = 最前，决定前后关系与投影）',
         value: c.depth,
@@ -2630,7 +2676,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(depth: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '组件外壳',
         summary: c.glass <= 0.001
             ? '关闭 —— 只有内容本身（玻璃/折射作用在字与图案上）'
@@ -2641,7 +2687,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(glass: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '视差系数',
         summary: c.parallax.abs() < 0.005
             ? '0 —— 完全固定（时钟不随晃动移动）'
@@ -2654,7 +2700,7 @@ class _PageP24SpatialWallpaperPageState
             _updateSelected((SpatialComponent x) => x.copyWith(parallax: v)),
       ),
       // 倾角 + 透视：这两个才是"像贴上去"的来源（位置不动，只改朝向）。
-      _MiSlider(
+      SpatialMiSlider(
         title: '平面倾斜',
         summary: '${(c.tiltY * 180 / math.pi).toStringAsFixed(0)}°（侧向视角）',
         value: c.tiltY,
@@ -2664,7 +2710,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(tiltY: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '俯仰倾斜',
         summary: '${(c.tiltX * 180 / math.pi).toStringAsFixed(0)}°',
         value: c.tiltX,
@@ -2674,7 +2720,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(tiltX: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '透视强度',
         summary: c.perspective < 0.0001
             ? '关闭（平行投影）'
@@ -2686,7 +2732,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(perspective: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '倾斜跟随',
         summary: _tiltFollow < 0.01
             ? '关闭（组件平面完全静止）'
@@ -2697,7 +2743,7 @@ class _PageP24SpatialWallpaperPageState
         insideMargin: _itemMargin,
         onValueChange: (double v) => setState(() => _tiltFollow = v),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '组件缩放',
         summary: '${(c.scale * 100).round()}%',
         value: c.scale,
@@ -2707,7 +2753,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(scale: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '组件透明度',
         summary: '${(c.opacity * 100).round()}%',
         value: c.opacity,
@@ -2717,7 +2763,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(opacity: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '玻璃感',
         summary: c.glass < 0.02
             ? '关闭（无玻璃底）'
@@ -2729,7 +2775,7 @@ class _PageP24SpatialWallpaperPageState
         onValueChange: (double v) =>
             _updateSelected((SpatialComponent x) => x.copyWith(glass: v)),
       ),
-      _MiSlider(
+      SpatialMiSlider(
         title: '圆角',
         summary: '${c.corner.round()} px',
         value: c.corner,
@@ -2743,848 +2789,3 @@ class _PageP24SpatialWallpaperPageState
   }
 }
 
-/// 涂刷轨迹的实时反馈：红色 = 画笔（加主体），蓝色 = 橡皮（去主体）。
-///
-/// 只画本次轨迹（归一化坐标 + 归一化半径），不做任何像素写入 ——
-/// 真正的落盘在松手后统一进行。
-class _BrushTrailPainter extends CustomPainter {
-  const _BrushTrailPainter({
-    required this.trail,
-    required this.radius,
-    required this.erase,
-  });
-
-  final List<Offset> trail;
-  final double radius;
-  final bool erase;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (trail.isEmpty || size.isEmpty) return;
-    final double r = radius * size.shortestSide;
-    final Paint p = Paint()
-      ..color = (erase
-              ? const Color(0xFF3B82F6)
-              : const Color(0xFFFF3B30))
-          .withValues(alpha: 0.45)
-      ..style = PaintingStyle.fill;
-
-    if (trail.length == 1) {
-      canvas.drawCircle(
-        Offset(trail.first.dx * size.width, trail.first.dy * size.height),
-        r,
-        p,
-      );
-      return;
-    }
-    for (int i = 1; i < trail.length; i++) {
-      final Offset a =
-          Offset(trail[i - 1].dx * size.width, trail[i - 1].dy * size.height);
-      final Offset b =
-          Offset(trail[i].dx * size.width, trail[i].dy * size.height);
-      // 用圆头粗线把相邻点连起来 —— 与 stamp 的插值行为一致，不会出现断续
-      canvas.drawLine(
-        a,
-        b,
-        Paint()
-          ..color = p.color
-          ..strokeWidth = r * 2
-          ..strokeCap = StrokeCap.round,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _BrushTrailPainter old) =>
-      old.trail.length != trail.length ||
-      old.radius != radius ||
-      old.erase != erase;
-}
-
-/// 层素材预览：棋盘格衬底 + 指定图层的原始像素。
-///
-/// 为什么要看这个：深度图预览走的是另一条渲染路径（逐像素 shader），它正确
-/// 并不能推出分层渲染正确。真正参与合成的是【层图】—— 里面含 alpha、含"猜"
-/// 出来的填充内容，而这一切在深度图预览里完全看不到。
-class _LayerMaterialView extends StatelessWidget {
-  const _LayerMaterialView({required this.layerSet, required this.index});
-
-  final DepthLayerSet layerSet;
-  final int index;
-
-  @override
-  Widget build(BuildContext context) {
-    final List<DepthLayer> ls = layerSet.layers;
-    if (ls.isEmpty) return const SizedBox.shrink();
-    final DepthLayer l = ls[index.clamp(0, ls.length - 1)];
-    return Stack(
-      fit: StackFit.expand,
-      children: <Widget>[
-        // 棋盘格在下：层的 alpha 为 0 处会透出它，一眼可辨。
-        const CustomPaint(painter: _CheckerPainter()),
-        RawImage(image: l.image, fit: BoxFit.fill),
-      ],
-    );
-  }
-}
-
-/// 棋盘格衬底（让 alpha=0 的区域一眼可辨）。
-class _CheckerPainter extends CustomPainter {
-  const _CheckerPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const double cell = 14;
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFF43434E),
-    );
-    final Paint dark = Paint()..color = const Color(0xFF2C2C34);
-    for (double y = 0; y < size.height; y += cell) {
-      for (double x = 0; x < size.width; x += cell) {
-        final int ix = (x / cell).floor();
-        final int iy = (y / cell).floor();
-        if ((ix + iy).isEven) continue;
-        canvas.drawRect(Rect.fromLTWH(x, y, cell, cell), dark);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// 焦点标记：小圆点 + 描边，指示当前"钉住"的层。
-class _FocusMarker extends StatelessWidget {
-  const _FocusMarker({required this.color, required this.outline});
-
-  final Color color;
-  final Color outline;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 28,
-      height: 28,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: outline.withValues(alpha: 0.9), width: 2),
-        ),
-        child: Center(
-          child: Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color.withValues(alpha: 0.85),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// S-40 历史列表的一行：缩略图 + 时间 / 占用 + 导出 / 删除。
-///
-/// 缩略图由每行自己异步读、读完 setState —— 列表可能有 20 条，
-/// 一次性全读进内存没有必要；`cacheWidth` 限制解码宽度，
-/// 避免把整张 4K 原图解码进内存（那正是"缓存一直涨"的老问题）。
-class _HistoryTile extends StatefulWidget {
-  const _HistoryTile({
-    super.key,
-    required this.entry,
-    required this.timeText,
-    required this.sizeText,
-    required this.isCurrent,
-    required this.onOpen,
-    required this.onExport,
-    required this.onDelete,
-  });
-
-  final WallpaperHistoryEntry entry;
-  final String timeText;
-  final String sizeText;
-  final bool isCurrent;
-  final VoidCallback onOpen;
-  final VoidCallback onExport;
-  final VoidCallback onDelete;
-
-  @override
-  State<_HistoryTile> createState() => _HistoryTileState();
-}
-
-class _HistoryTileState extends State<_HistoryTile> {
-  Uint8List? _thumb;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(
-      WallpaperHistoryService.readFile(widget.entry.previewPath)
-          .then((Uint8List? b) {
-        if (mounted) setState(() => _thumb = b);
-      }),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final body1 = MiuixTheme.of(context).textStyles.body1;
-    final body2 = MiuixTheme.of(context).textStyles.body2;
-    final Uint8List? t = _thumb;
-    return Row(
-      children: <Widget>[
-        // 点缩略图 / 文字区 → 载入该条继续编辑
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onOpen,
-            child: Row(
-              children: <Widget>[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: SizedBox(
-                    width: 56,
-                    height: 56,
-                    child: t == null
-                        ? ColoredBox(
-                            color: colors.onSurfaceVariantSummary
-                                .withValues(alpha: 0.18),
-                          )
-                        : Image.memory(t, fit: BoxFit.cover, cacheWidth: 168),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          MiuixText(widget.timeText, style: body1),
-                          if (widget.isCurrent) ...<Widget>[
-                            const SizedBox(width: 6),
-                            MiuixText(
-                              '编辑中',
-                              style: body2,
-                              color: colors.primary,
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      MiuixText(
-                        widget.sizeText,
-                        style: body2,
-                        color: colors.onSurfaceVariantSummary,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        C21CapsuleIconButton(
-          key: ValueKey<String>('wallpaper.history.export.${widget.entry.id}'),
-          icon: appIcon('download'),
-          tooltip: '导出到相册',
-          onTap: widget.onExport,
-        ),
-        C21CapsuleIconButton(
-          key: ValueKey<String>('wallpaper.history.delete.${widget.entry.id}'),
-          icon: appIcon('delete'),
-          tooltip: '删除',
-          onTap: widget.onDelete,
-        ),
-      ],
-    );
-  }
-}
-
-// ── 澎湃样式的三个基础控件（签名兼容 Miuix，供整体替换）──────────
-//
-// ★ 为什么做成"签名兼容"而不是逐个重写调用点
-//   上一版只换了外壳（顶栏 / 工具行），页面上仍有 10 个滑杆、4 个开关、
-//   18 个按钮是 Miuix 的**设置项**样式 —— 所以整页看起来是拼的，不是复刻。
-//   这里把参数签名对齐（insideMargin / summary / colors 这些收下但不用），
-//   调用点只改一个类名就能整体切换，不会再出现"漏了几个没改"。
-
-/// 参数滑杆（澎湃样式）。兼容 `MiuixSliderPreference` 的调用签名。
-class _MiSlider extends StatelessWidget {
-  const _MiSlider({
-    required this.title,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onValueChange,
-    this.summary,
-    this.enabled = true,
-    this.insideMargin,
-  });
-
-  final String title;
-  final double value;
-  final double min;
-  final double max;
-  final ValueChanged<double> onValueChange;
-
-  /// 参数名下的那句解释（澎湃也会给一行小字说明当前值意味着什么）。
-  final String? summary;
-  final bool enabled;
-
-  /// 兼容 Miuix 的调用签名；本组件自己控边距，收了不用。
-  final EdgeInsets? insideMargin;
-
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      // 禁用态：整体压暗，比"灰字"更接近澎湃的处理
-      opacity: enabled ? 1.0 : 0.38,
-      child: _ParamSlider(
-        title: title,
-        subtitle: summary,
-        value: value,
-        min: min,
-        max: max,
-        valueText: value.toStringAsFixed(2),
-        onChanged: enabled ? onValueChange : (double _) {},
-      ),
-    );
-  }
-}
-
-/// 开关（澎湃样式）：细长药丸 + 白色圆钮。兼容 `MiuixSwitchPreference`。
-class _MiSwitch extends StatelessWidget {
-  const _MiSwitch({
-    required this.title,
-    required this.value,
-    required this.onChanged,
-    this.summary,
-    this.insideMargin,
-  });
-
-  final String title;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final String? summary;
-
-  /// 兼容参数，收了不用。
-  final EdgeInsets? insideMargin;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 5, 16, 5),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                MiuixText(title, style: MiuixTheme.of(context).textStyles.body1),
-                if (summary != null) ...<Widget>[
-                  const SizedBox(height: 2),
-                  MiuixText(
-                    summary!,
-                    style: MiuixTheme.of(context).textStyles.body2,
-                    color: colors.onSurfaceVariantSummary,
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => onChanged(!value),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              width: 46,
-              height: 26,
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(13),
-                color: value
-                    ? colors.primary
-                    : colors.onSurface.withValues(alpha: 0.18),
-              ),
-              child: AnimatedAlign(
-                duration: const Duration(milliseconds: 140),
-                alignment:
-                    value ? Alignment.centerRight : Alignment.centerLeft,
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Color(0xFFFFFFFF),
-                  ),
-                  child: SizedBox(width: 20, height: 20),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 按钮（澎湃样式）。兼容 `MiuixButton` 的调用签名。
-///
-/// 选中态**沿用旧调用的 `colors` 参数**来判断 —— 调用方传了
-/// `buttonColorsPrimary` 就是选中，不必再逐个改调用点。
-class _MiButton extends StatelessWidget {
-  const _MiButton({
-    super.key,
-    required this.child,
-    this.onPressed,
-    this.colors,
-  });
-
-  final Widget child;
-  final VoidCallback? onPressed;
-
-  /// 兼容参数：非 null 即"选中/主操作"，本组件据此换配色。
-  final Object? colors;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool on = onPressed != null;
-    final bool primary = colors != null;
-    final MiuixColors mi = MiuixTheme.of(context).colors;
-    return Opacity(
-      opacity: on ? 1.0 : 0.35,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: primary ? _MiAccent.fill : const Color(0x1FFFFFFF),
-          ),
-          child: Center(
-            // ★ 必须【无条件】给文字定色。
-            //   这一页虽然用 MiuixThemeController 强制了深色，但外面那层
-            //   Material 仍带着 App 浅色主题的 DefaultTextStyle（深字）——
-            //   透传的 Text 会继承它，深字压在深底上就等于"文字不显示"。
-            //   旧版 MiuixButton 自己管颜色，所以没暴露这个问题。
-            child: DefaultTextStyle(
-              style: TextStyle(
-                color: primary ? const Color(0xFF1A1A1A) : mi.onSurface,
-                fontSize: 14,
-                fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
-              ),
-              child: child,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 澎湃那套按钮/控件用到的两个固定色（不跟主题走）。
-abstract final class _MiAccent {
-  /// 主操作 / 选中：金色
-  static const Color fill = Color(0xFFFFD54F);
-}
-
-/// S-41 摇杆：拖这个盘控制晃动方向（-1..1）。
-///
-/// 为什么需要它：
-///   · Web / 桌面根本没有传感器；
-///   · 真机上也有用户不想一直举着手机晃；
-///   · 它同时也是**无障碍输入** —— 不方便动手机的人一样能用。
-///
-/// ★ 松手【不回正】：调壁纸时更需要把某个角度定住慢慢看，
-///   而不是像游戏摇杆那样弹回中间。要回正请点「回正」。
-class _JoystickPad extends StatelessWidget {
-  const _JoystickPad({required this.value, required this.onChanged});
-
-  final Offset value;
-  final ValueChanged<Offset> onChanged;
-
-  static const double _size = 132;
-  static const double _knob = 36;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    const double r = (_size - _knob) / 2;
-    return Center(
-      child: GestureDetector(
-        key: const ValueKey<String>('wallpaper.joystick'),
-        behavior: HitTestBehavior.opaque,
-        onPanStart: (DragStartDetails d) => _report(d.localPosition, r),
-        onPanUpdate: (DragUpdateDetails d) => _report(d.localPosition, r),
-        child: Container(
-          width: _size,
-          height: _size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: colors.onSurfaceVariantSummary.withValues(alpha: 0.45),
-              width: 1.5,
-            ),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: <Widget>[
-              Transform.translate(
-                offset: Offset(value.dx * r, value.dy * r),
-                child: Container(
-                  width: _knob,
-                  height: _knob,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: colors.primary.withValues(alpha: 0.85),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _report(Offset local, double r) {
-    final Offset d = local - const Offset(_size / 2, _size / 2);
-    onChanged(
-      Offset((d.dx / r).clamp(-1.0, 1.0), (d.dy / r).clamp(-1.0, 1.0)),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// 编辑器 UI 组件（对齐小米澎湃相册编辑器）
-//
-// 结构：
-//   顶栏     ✕ · ↶ · ↷ · [保存] · ⋮        （_RoundIconButton / _SavePill）
-//   控件区   当前子工具的滑卡 / 开关
-//   二级行   子工具 —— 圆角方块 + 图标 + 文字，选中描一圈高亮环（_ToolTile）
-//   一级行   主分类 —— 更小，选中用胶囊底色（_CategoryPill）
-// ══════════════════════════════════════════════════════════════
-
-/// 顶栏圆形描边图标按钮（澎湃那套：一圈细描边 + 居中图标）。
-class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({
-    super.key,
-    required this.icon,
-    required this.tooltip,
-    this.onTap,
-  });
-
-  final MiuixVectorIcon icon;
-  final String tooltip;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final bool on = onTap != null;
-    final Color fg = on
-        ? colors.onSurface
-        : colors.onSurfaceVariantSummary.withValues(alpha: 0.35);
-    // 用 Semantics 而不是 material 的 Tooltip —— 本页只引 widgets 层，
-    // 不为了一个悬浮提示把整个 material 拉进来。
-    return Semantics(
-      label: tooltip,
-      button: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: SizedBox(
-          width: 38,
-          height: 38,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: fg.withValues(alpha: on ? 0.45 : 0.2),
-                width: 1.2,
-              ),
-            ),
-            child: Center(
-              child: MiuixIcon(vector: icon, size: 19, tint: fg),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 顶栏右侧的胶囊按钮（澎湃的「保存」）。
-class _SavePill extends StatelessWidget {
-  const _SavePill({super.key, this.onTap});
-
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final bool on = onTap != null;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: on
-              ? colors.onSurface.withValues(alpha: 0.12)
-              : colors.onSurface.withValues(alpha: 0.05),
-        ),
-        child: MiuixText(
-          '保存',
-          style: MiuixTheme.of(context).textStyles.body1,
-          color: on
-              ? colors.onSurface
-              : colors.onSurfaceVariantSummary.withValues(alpha: 0.35),
-        ),
-      ),
-    );
-  }
-}
-
-/// 一级工具（主分类）：图标 + 文字，选中时整块变成胶囊底色。
-class _CategoryPill extends StatelessWidget {
-  const _CategoryPill({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final MiuixVectorIcon icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final Color fg =
-        selected ? colors.onSurface : colors.onSurfaceVariantSummary;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        width: 58,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        margin: const EdgeInsets.symmetric(horizontal: 3),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: selected
-              ? colors.onSurface.withValues(alpha: 0.14)
-              : const Color(0x00000000),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            MiuixIcon(vector: icon, size: 21, tint: fg),
-            const SizedBox(height: 4),
-            MiuixText(
-              label,
-              style: MiuixTheme.of(context).textStyles.body2,
-              color: fg,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 二级工具（子工具）：圆角方块 + 图标 + 文字，**选中描一圈高亮环**。
-///
-/// 这一圈环是澎湃编辑器最显眼的识别特征 —— 用它而不是填充色，
-/// 是为了让"选中"在深色底上也一眼可辨，同时不遮挡图标本身。
-class _ToolTile extends StatelessWidget {
-  const _ToolTile({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final MiuixVectorIcon icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    // 澎湃的高亮环是暖金色；这里沿用主题的 primary，观感一致又不写死颜色。
-    final Color ring = colors.primary;
-    final Color fg =
-        selected ? colors.onSurface : colors.onSurfaceVariantSummary;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        // ★ 固定 68×68 圆角方块（澎湃的工具块就是这个尺寸与圆角）。
-        //   之前是按内容撑开，块的大小会随文字长短变化，一列看过去参差不齐。
-        width: 68,
-        height: 68,
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: colors.onSurface.withValues(alpha: selected ? 0.10 : 0.05),
-          border: Border.all(
-            color: selected ? ring : const Color(0x00000000),
-            width: 1.6,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            MiuixIcon(vector: icon, size: 22, tint: fg),
-            const SizedBox(height: 5),
-            MiuixText(
-              label,
-              style: MiuixTheme.of(context).textStyles.body2,
-              color: fg,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 参数滑卡（澎湃风格）：圆角轨道 + 圆形滑块，左侧标题、右侧数值。
-///
-/// 与 MiuixSliderPreference 的差别：那个是"设置项"比例（整行、大留白），
-/// 编辑器里参数是密集高频操作，所以轨道更矮、数值靠右对齐、上下留白更小。
-class _ParamSlider extends StatelessWidget {
-  const _ParamSlider({
-    required this.title,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-    this.valueText,
-    this.subtitle,
-  });
-
-  final String title;
-  final double value;
-  final double min;
-  final double max;
-  final ValueChanged<double> onChanged;
-  final String? valueText;
-
-  /// 参数名下的一行小字（说明当前值意味着什么）。
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final MiuixColors colors = MiuixTheme.of(context).colors;
-    final double t = ((value - min) / (max - min)).clamp(0.0, 1.0);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              MiuixText(
-                title,
-                style: MiuixTheme.of(context).textStyles.body2,
-                color: colors.onSurfaceVariantSummary,
-              ),
-              const Spacer(),
-              MiuixText(
-                valueText ?? value.toStringAsFixed(2),
-                style: MiuixTheme.of(context).textStyles.body2,
-                color: colors.onSurface,
-              ),
-            ],
-          ),
-          if (subtitle != null) ...<Widget>[
-            const SizedBox(height: 2),
-            MiuixText(
-              subtitle!,
-              style: MiuixTheme.of(context).textStyles.body2,
-              color: colors.onSurfaceVariantSummary,
-            ),
-          ],
-          const SizedBox(height: 6),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints c) {
-              const double knob = 20;
-              final double usable = (c.maxWidth - knob).clamp(1.0, 1e6);
-              void seek(Offset local) => onChanged(
-                    (min + (local.dx - knob / 2) / usable * (max - min))
-                        .clamp(min, max),
-                  );
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTapDown: (TapDownDetails d) => seek(d.localPosition),
-                onHorizontalDragUpdate: (DragUpdateDetails d) =>
-                    seek(d.localPosition),
-                child: SizedBox(
-                  height: 30,
-                  child: Stack(
-                    alignment: Alignment.centerLeft,
-                    children: <Widget>[
-                      // 轨道
-                      Container(
-                        height: 6,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(3),
-                          color: colors.onSurface.withValues(alpha: 0.14),
-                        ),
-                      ),
-                      // 已选段
-                      Container(
-                        height: 6,
-                        width: knob / 2 + usable * t,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(3),
-                          color: colors.primary.withValues(alpha: 0.55),
-                        ),
-                      ),
-                      // 滑块
-                      Transform.translate(
-                        offset: Offset(usable * t, 0),
-                        child: Container(
-                          width: knob,
-                          height: knob,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: colors.primary,
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: colors.primary.withValues(alpha: 0.35),
-                                blurRadius: 8,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}

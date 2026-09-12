@@ -17,6 +17,13 @@ analyzer:
     # v1.44.0:vendor 依赖(flutter_flow_chart 本地拷贝)自带风格/告警,
     #   不参与项目 lint 门禁(编译错误仍由构建器把关)。
     - third_party/**
+    # v2.1.0 项目整理:以下目录是【移植工作区/构建产物】,不是本工程源码。
+    #   harmonyos_port/ 是 lib/ 的鸿蒙移植副本(427 文件 13 MB,git 未跟踪),
+    #   被 gitignore 挡住却【不被 analyzer 挡住】—— 每次 analyze 白扫 324 个
+    #   dart 文件、报 17 条假 info、多花 ~60 秒,把真实问题淹掉。
+    - harmonyos_port/**
+    - _release/**
+    - _test_builds/**
 
 linter:
   rules:
