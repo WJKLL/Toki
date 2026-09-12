@@ -385,7 +385,10 @@ class _PageP24SpatialWallpaperPageState
     key: const ValueKey<String>('wallpaper.back'),
     icon: appIcon('chevronBackward'),
     tooltip: '返回',
-    onTap: () => Navigator.of(context).maybePop(),
+    onTap: () {
+      // ★ 逐级返回：先收当前层级，收完了才真正退页面。
+      if (!_handleBack()) Navigator.of(context).maybePop();
+    },
   );
 
   @override
@@ -414,10 +417,9 @@ class _PageP24SpatialWallpaperPageState
     _tiltSub = null;
     _ticker.dispose();
     _zoomCtrl.dispose();
-    _maskImage?.dispose();
-    _layerSet?.dispose();
-    _depth?.dispose();
-    _photo?.dispose();
+    // 统一释放。以前这里只 dispose 了这 4 个 ui.Image，而深度结果 / 主体 mask /
+    // 撤销栈会一直挂到进程结束 —— 那也是"越编辑越占内存"的一部分。
+    _releaseEditorResources();
     super.dispose();
   }
 
@@ -526,17 +528,13 @@ class _PageP24SpatialWallpaperPageState
         return;
       }
       setState(() {
-        _photo?.dispose();
+        // ★ 换图 → 先把上一张的**全部**资源释放干净。
+        //   以前这里只清了三样（层集 / mask / 深度），深度推理结果、mask 图、
+        //   撤销栈全都留着 —— 换十张图就堆十份，这是"越编辑越占内存"的另一个来源。
+        _releaseEditorResources();
+        _historyId = entry?.id;
         _photo = img;
         _photoBytes = f.bytes;
-        _aiDepth = false;
-        _aiInfo = '';
-        // 换图 → 上一张的主体 mask 立即失效，避免套用到新图的人身上。
-        _subjectMask = null;
-        _layerSet?.dispose();
-        _layerSet = null;
-        // 换图 → 成片也要写到新那条历史上，不能落到上一张头上。
-        _historyId = entry?.id;
       });
       await _rebuildDepth();
     } catch (e) {
@@ -958,7 +956,15 @@ class _PageP24SpatialWallpaperPageState
     // ★ 本页【强制深色】—— 参考系统相册编辑器的沉浸式编辑界面。
     //   浅色主题下画面周围的大片留白会把整体观感带偏（判断视差效果时尤其明显）。
     //   只包这一页，不影响 App 其它页面的主题。
-    return MiuixThemeController(
+    // ★ 侧滑 / 系统返回键也要逐级：有打开的层级时 canPop=false，
+    //   让 onPopInvoked 去收一层；收完了 canPop 变 true，下一次返回才真退出。
+    //   不这么做的话，侧滑会一路弹回首页，把用户打开的菜单整个跳过。
+    return PopScope(
+      canPop: !_anyLevelOpen,
+      onPopInvokedWithResult: (bool didPop, Object? _) {
+        if (!didPop) _handleBack();
+      },
+      child: MiuixThemeController(
       colorSchemeMode: MiuixColorSchemeMode.dark,
       child: Builder(
         builder: (BuildContext context) {
@@ -991,13 +997,23 @@ class _PageP24SpatialWallpaperPageState
                       ),
                       _buildToolBar(colors),
                     ],
-                    SizedBox(height: padding.bottom),
+                    // ★ 工具行必须避开系统导航条（手势条）。
+                    //   本页 MiuixScaffold 用了 contentWindowInsets: EdgeInsets.zero，
+                    //   所以 [padding].bottom 恒为 0 —— 必须自己取 viewPadding，
+                    //   否则一级菜单会被手势条压住、点不到。
+                    SizedBox(
+                      height: math.max(
+                        padding.bottom,
+                        MediaQuery.viewPaddingOf(context).bottom,
+                      ),
+                    ),
                   ],
                 ),
               );
             },
           );
         },
+      ),
       ),
     );
   }
@@ -1043,8 +1059,11 @@ class _PageP24SpatialWallpaperPageState
 
   Future<void> _deleteHistory(WallpaperHistoryEntry e) async {
     await WallpaperHistoryService.instance.delete(e.id);
-    // 删掉的正好是当前在编辑的那张 → 只断开关联，不粗暴清屏。
-    if (_historyId == e.id) _historyId = null;
+    if (!mounted) return;
+    // ★ 删掉的正好是当前在编辑的那张 → **连同编辑期资源一起释放**。
+    //   只断开关联不释放内存的话，删掉一百条历史，占用还是那几十 MB
+    //   —— 这正是"缓存不跟着历史释放"的成因。
+    if (_historyId == e.id) setState(_releaseEditorResources);
     await _refreshHistory();
   }
 
@@ -1061,15 +1080,12 @@ class _PageP24SpatialWallpaperPageState
       }
       setState(() {
         _historyOpen = false;
-        _historyId = e.id;
-        _photo?.dispose();
+        // 换条目 → 同样先释放干净的上一份，别把两层图摞起来。
+        final String keepId = e.id;
+        _releaseEditorResources();
+        _historyId = keepId;
         _photo = img;
         _photoBytes = bytes;
-        _aiDepth = false;
-        _aiInfo = '';
-        _subjectMask = null;
-        _layerSet?.dispose();
-        _layerSet = null;
       });
       await _rebuildDepth();
     } catch (err) {
@@ -1154,6 +1170,73 @@ class _PageP24SpatialWallpaperPageState
         ),
       ],
     );
+  }
+
+  /// 释放编辑期占用的**全部**资源。
+  ///
+  /// ★ 为什么必须有它（用户反馈："图片编辑越多，用户缓存不会跟着删除历史而释放"）
+  ///   删历史只删了磁盘上的文件；编辑期解码出来的 ui.Image / Float32List
+  ///   仍然挂在字段上 —— 其中最重的是图层集：每层 1440×1920×4 ≈ 11 MB，
+  ///   两三层就是 20~35 MB，再加深度图、主体 mask、撤销栈（12 份 ≈ 8 MB），
+  ///   一次编辑轻松几十 MB。**删一条历史并不会让它变小**。
+  ///   所以"释放"必须和"删除/换图"绑在一起，而且要一条不漏 ——
+  ///   漏一个字段就漏一份内存，这正是之前那种"缓存只涨不落"的来源。
+  void _releaseEditorResources() {
+    _layerSet?.dispose();
+    _layerSet = null;
+    _depth?.dispose();
+    _depth = null;
+    _maskImage?.dispose();
+    _maskImage = null;
+    _photo?.dispose();
+    _photo = null;
+    // 纯数据（不需要 dispose，但要主动断开引用，否则 GC 收不掉）
+    _photoBytes = null;
+    _aiResult = null;
+    _subjectMask = null;
+    _editMask = null;
+    _undoStack.clear();
+    _brushMode = 0;
+    _historyId = null;
+    _aiDepth = false;
+    _aiInfo = '';
+  }
+
+  /// 是否有任何"打开的层级"（涂刷 / 历史面板 / 调试 / 工具页）。
+  bool get _anyLevelOpen =>
+      _brushMode != 0 || _historyOpen || _debugOpen || _toolTab != 0;
+
+  /// 逐级返回：**先收起当前打开的层级**，都收完了才真正退出页面。
+  ///
+  /// ★ 为什么必须有（用户反馈："从历史编辑侧滑返回上一页，直接推出到首页，
+  ///   不是上一级菜单"）
+  ///   之前侧滑 / 返回键直接 pop 路由 —— 一路退回首页，用户刚打开的二级菜单、
+  ///   历史面板、涂刷模式被整个跳过。安卓用户对"返回上一层"的预期是**逐级**的，
+  ///   直接退出会让人觉得"我明明还在编辑，怎么人就没了"。
+  ///
+  /// 返回 true = 已经消化掉这次返回；false = 没有可收的层级，交给系统退出。
+  bool _handleBack() {
+    if (_brushMode != 0) {
+      setState(() => _brushMode = 0);
+      return true;
+    }
+    if (_historyOpen) {
+      setState(() => _historyOpen = false);
+      return true;
+    }
+    if (_debugOpen) {
+      setState(() => _debugOpen = false);
+      return true;
+    }
+    if (_toolTab != 0) {
+      setState(() {
+        _toolTab = 0;
+        _subTab = 0;
+        _groupTab = 0;
+      });
+      return true;
+    }
+    return false;
   }
 
   /// 顶部栏：返回 / 撤销 / 导入 / 保存 / 更多（对齐系统相册编辑器的动作集合）。
@@ -2584,6 +2667,7 @@ class _MiButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool on = onPressed != null;
     final bool primary = colors != null;
+    final MiuixColors mi = MiuixTheme.of(context).colors;
     return Opacity(
       opacity: on ? 1.0 : 0.35,
       child: GestureDetector(
@@ -2593,23 +2677,22 @@ class _MiButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            color: primary
-                ? _MiAccent.fill
-                : const Color(0x1FFFFFFF),
+            color: primary ? _MiAccent.fill : const Color(0x1FFFFFFF),
           ),
           child: Center(
-            // 金底上用深色字，否则浅色主题文字压在金底上根本看不清。
-            // DefaultTextStyle 对普通的 Text 生效（MiuixText 自己有颜色，不受影响）。
-            child: primary
-                ? DefaultTextStyle(
-                    style: const TextStyle(
-                      color: Color(0xFF1A1A1A),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    child: child,
-                  )
-                : child,
+            // ★ 必须【无条件】给文字定色。
+            //   这一页虽然用 MiuixThemeController 强制了深色，但外面那层
+            //   Material 仍带着 App 浅色主题的 DefaultTextStyle（深字）——
+            //   透传的 Text 会继承它，深字压在深底上就等于"文字不显示"。
+            //   旧版 MiuixButton 自己管颜色，所以没暴露这个问题。
+            child: DefaultTextStyle(
+              style: TextStyle(
+                color: primary ? const Color(0xFF1A1A1A) : mi.onSurface,
+                fontSize: 14,
+                fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
+              ),
+              child: child,
+            ),
           ),
         ),
       ),
