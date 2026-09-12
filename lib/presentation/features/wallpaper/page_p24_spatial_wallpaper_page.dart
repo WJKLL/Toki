@@ -990,8 +990,40 @@ class _PageP24SpatialWallpaperPageState
                     if (_historyOpen)
                       Expanded(child: _buildHistoryPanel(colors))
                     else ...<Widget>[
-                      Expanded(child: _buildStage(colors)),
-                      ConstrainedBox(
+                      // ★★ 画面铺满整屏，参数区【浮在它上面】。
+                      //
+                      //   这是相册编辑器的标准做法（小米/华为/iOS 都一样）：
+                      //   图片是主角、占满可用区域，参数与工具行作为**覆盖层**
+                      //   浮在它下半部，而不是在 Column 里占掉一行高度。
+                      //
+                      //   之前参数区是布局里的一行，直接吃掉 24% 屏高 ——
+                      //   竖图在"高度受限"的盒子里只能缩得很小
+                      //   （用户反馈："画布无法放大，被压缩很小"）。
+                      //   改成覆盖层之后，画面拿回那 24%，而且不再受参数区高度影响。
+                      Expanded(
+                        child: Stack(
+                          children: <Widget>[
+                            Positioned.fill(child: _buildStage(colors)),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              // 参数浮层给一层自上而下的暗色渐变兜底，
+                              // 否则参数文字压在亮画面上会看不清。
+                              child: DecoratedBox(
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: <Color>[
+                                      Color(0x00000000),
+                                      Color(0xCC000000),
+                                      Color(0xF2000000),
+                                    ],
+                                    stops: <double>[0.0, 0.35, 1.0],
+                                  ),
+                                ),
+                                child: ConstrainedBox(
                         constraints: BoxConstraints(maxHeight: maxPanel),
                         // ★ 换分类 / 二级 / 三级 / 调试都走同一段过渡：淡入 + 轻微上移。
                         //   之前参数区是"啪"地整块换掉，观感很硬。
@@ -1020,6 +1052,11 @@ class _PageP24SpatialWallpaperPageState
                             padding: const EdgeInsets.only(bottom: 2),
                             child: _buildControls(colors),
                           ),
+                        ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       _buildToolBar(colors),
